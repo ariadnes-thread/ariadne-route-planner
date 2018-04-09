@@ -1,3 +1,7 @@
 {
-  "placeholder": "value"
+  "dbHost": "localhost",
+  "dbName": "ariadne_gis",
+  "dbUser": "ariadne_gis",
+  "dbPass": "password",
+  "dbPort": 5432
 }
