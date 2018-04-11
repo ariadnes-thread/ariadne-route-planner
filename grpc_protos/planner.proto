@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+// The route planner service definition.
+service RoutePlanner {
+  // Plan a route
+  rpc PlanRoute (JsonReply) returns (JsonReply) {}
+}
+
+// Message containing JSON data
+message JsonReply {
+  string jsonData = 1;
+}
