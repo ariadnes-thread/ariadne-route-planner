@@ -22,7 +22,8 @@ BEGIN
                         ORDER BY the_geom <-> ST_SetSRID(ST_Point(%1$s, %2$s), 4326) LIMIT 1),
                     -- known target closest to actual target
                     (SELECT id FROM ways_vertices_pgr
-                        ORDER BY the_geom <-> ST_SetSRID(ST_Point(%3$s, %4$s), 4326) LIMIT 1))
+                        ORDER BY the_geom <-> ST_SetSRID(ST_Point(%3$s, %4$s), 4326) LIMIT 1)),
+                    directed:=false)
             )
             SELECT
                 ST_AsGeoJSON(ST_LineMerge(ST_Union(the_geom))) as geojson, SUM(length_m) as length
