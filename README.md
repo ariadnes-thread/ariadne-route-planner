@@ -10,7 +10,7 @@ You'll need to create a `config.json` to build/run the app. An example config ha
 `config.example.json`. You can run the `run-db-demo.py` script to check if the DB details you've specified in the config
 are valid. 
 
-To start Router Planner gRPC server, use `planner/start-sever.py` script. This service is used by [Ariadne HTTP API](https://github.com/ariadnes-thread/ariadne-api).
+To start Router Planner gRPC server, use `planner/start_sever.py` script. This service is used by [Ariadne HTTP API](https://github.com/ariadnes-thread/ariadne-api).
 
 # Rebuilding gRPC code
 
