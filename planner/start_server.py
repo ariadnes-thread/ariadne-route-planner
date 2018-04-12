@@ -31,6 +31,7 @@ class RoutePlanner(planner_pb2_grpc.RoutePlannerServicer):
             cur = conn.cursor()
             cur.execute('SELECT * FROM pathFromNearestKnownPoints(%s,%s,%s,%s)', (orig_lng, orig_lat, dest_lng, dest_lat))
             linestring, length = cur.fetchone()
+            connPool.putconn(conn)
             data['route'] = json.loads(linestring)
             data['length'] = length
             json_data = json.dumps(data, separators=(',', ':'))
