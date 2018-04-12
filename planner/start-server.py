@@ -23,7 +23,22 @@ class RoutePlanner(planner_pb2_grpc.RoutePlannerServicer):
         }
 
         constraints = json.loads(request.jsonData)
-        print(constraints)
+
+        # Lat/lng of origin
+        origin = constraints.get('origin')
+        if origin:
+            origin_lat = origin.get('latitude')
+            origin_lng = origin.get('longitude')
+            print('Origin lat : long is {} : {}'.format(origin_lat, origin_lng))
+        else:
+            print('No origin specified!')
+
+        # Same for destination
+        destination = constraints.get('destination')
+        if destination:
+            print('Destination is {}'.format(destination))
+        else:
+            print('No destination specified!')
 
         json_data = json.dumps(data, separators=(',', ':'))
         return planner_pb2.JsonReply(jsonData=json_data)
