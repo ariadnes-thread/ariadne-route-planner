@@ -33,10 +33,12 @@ class RoutePlanner(planner_pb2_grpc.RoutePlannerServicer):
             linestring, length = cur.fetchone()
             data['route'] = json.loads(linestring)
             data['length'] = length
+            json_data = json.dumps(data, separators=(',', ':'))
+            return planner_pb2.JsonReply(jsonData=json_data)
         else:
-            data['error'] = 'invalid origin or destination'
-        json_data = json.dumps(data, separators=(',', ':'))
-        return planner_pb2.JsonReply(jsonData=json_data)
+            context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+            context.set_details('Invalid origin or destination!')
+            return planner_pb2.JsonReply()   
 
 
 def serve():
