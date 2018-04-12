@@ -22,6 +22,9 @@ class RoutePlanner(planner_pb2_grpc.RoutePlannerServicer):
             ]
         }
 
+        constraints = json.loads(request.jsonData)
+        print(constraints)
+
         json_data = json.dumps(data, separators=(',', ':'))
         return planner_pb2.JsonReply(jsonData=json_data)
 
