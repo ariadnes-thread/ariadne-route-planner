@@ -5,7 +5,6 @@ from typing import *
 
 import googlemaps
 import db_conn
-import psycopg2
 import geopy.distance
 
 
@@ -54,7 +53,6 @@ class OrienteeringRouter:
 
         return output
 
-
     def nearest_vertex(self, latlon: Tuple[float, float]) -> int:
         """
         Return nearest vertex to a (lat, lon) pair.
@@ -70,6 +68,25 @@ class OrienteeringRouter:
         result = self.cur.fetchone()
         return result[0]
 
+    def all_pairs_shortest_path_costs(self, vids: List[int]) \
+            -> Dict[Tuple[int, int], float]:
+        """
+        Compute distance between each pair of vertices.
+        :param vids: List of vertex ids.
+        :return: Map of (vertex pair) -> distance.
+        """
+        # Execute many-to-many Dijkstra's. Give edge costs in meters
+        self.cur.execute('''
+        SELECT *
+        FROM pgr_dijkstraCost(
+            'SELECT gid AS id, source, target, length_m AS cost, ' ||
+             'length_m * SIGN(reverse_cost) AS reverse_cost FROM ways',
+            %s, %s)
+        ''', (vids, vids))
+        results = self.cur.fetchall()
+        return {(start_vid, end_vid): length
+                for (start_vid, end_vid, length) in results}
+
 
 def midpoint(coord1, coord2):
     """Return midpoint of two lat/lon coordinates."""
@@ -79,13 +96,6 @@ if __name__ == '__main__':
     origin = (34.140003, -118.122775)  # Caltech
     dest = (34.140707, -118.132212)  # Lake Ave
     length_m = 6000  # Maximum length of path in meters
-
-    # # *only valid for Pasadena area*
-    # # Used an online calculator to get m/deg at Pasadena's latitude
-    # m_per_deg_latitude = 110924.90
-    # m_per_deg_longitude = 92232.91
-    # m_per_deg = (m_per_deg_latitude + m_per_deg_longitude) / 2
-    # length_deg = length_m / m_per_deg
 
     with open('config.json') as f:
         config = json.load(f)
@@ -106,9 +116,15 @@ if __name__ == '__main__':
     ]
     # print(len(parks), parks)
 
-    # Map POIs to actual vertices
+    # Map origin, dest, and POIs to actual vertices
+    origin_vid = router.nearest_vertex(origin)
+    dest_vid = router.nearest_vertex(dest)
     park_nodes = {
         router.nearest_vertex(park.latlon): park
         for park in parks
     }
     pprint(park_nodes)
+
+    # Solve APSP between origin, dest, and POIs
+    all_vids = [origin_vid, dest_vid] + list(park_nodes.keys())
+    pprint(router.all_pairs_shortest_path_costs(all_vids))
