@@ -3,5 +3,6 @@
   "dbName": "ariadne_gis",
   "dbUser": "ariadne_gis",
   "dbPass": "password",
-  "dbPort": 5432
+  "dbPort": 5432,
+  "gmapsApiKey": "key"
 }

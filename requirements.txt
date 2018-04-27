@@ -1,3 +1,5 @@
+geopy==1.13.0
+googlemaps==2.5.1
 grpcio==1.10.1
 grpcio-tools==1.10.1
 protobuf==3.5.2.post1
