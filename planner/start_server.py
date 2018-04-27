@@ -25,10 +25,10 @@ class RoutePlanner(planner_pb2_grpc.RoutePlannerServicer):
         origin = constraints.get('origin')
         destination = constraints.get('destination')
         if origin is not None and destination is not None:
-            orig_lat = origin.get('latitude')
-            orig_lng = origin.get('longitude')
-            dest_lat = destination.get('latitude')
-            dest_lng = destination.get('longitude')
+            orig_lat = float(origin.get('latitude'))
+            orig_lng = float(origin.get('longitude'))
+            dest_lat = float(destination.get('latitude'))
+            dest_lng = float(destination.get('longitude'))
             conn = connPool.getconn()
 
             # TODO: Get length from frontend
