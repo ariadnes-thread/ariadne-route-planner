@@ -10,6 +10,11 @@ import geopy.distance
 
 
 class OrienteeringRouter:
+    """
+    Router that makes routes by visiting nice vertices.
+    Basically make_route is the only function meant to be used from outside.
+    """
+
     GmapsResult = namedtuple('GmapsResult', ['name', 'latlon', 'rating'])
 
     def __init__(self, gmaps_api_key: str, conn):
@@ -145,6 +150,11 @@ class OrienteeringRouter:
                 # If no POIs are feasible, go directly to destination
                 if feasible == []:
                     curpath.append(dest_vid)
+                    # TODO: we don't add the curnode-dest distance...
+                    # It risks a KeyError
+                    # Though we still respect the max_distance maximum
+                    # I hope to bugfix by factoring out the code that generates
+                    # one path into its own function someday...
                     break
 
                 # Choose next node
@@ -191,13 +201,61 @@ class OrienteeringRouter:
         ''', (nodes,))
         return self.cur.fetchone()
 
+    def make_route(self, origin: Tuple[float, float], dest: Tuple[float, float],
+                   length_m: float) -> Tuple[str, float]:
+        """
+        Make a route of at most a given length using orienteering heuristics.
+        :param origin: lat/lon pair.
+        :param dest: lat/lon pair.
+        :param length_m: Desired length in meters.
+        :return: (GeoJSON of route, total length of route in meters)
+        """
+        # Get points of interest
+        center = midpoint(origin, dest)
+        print('CENTER:', center)
+        parks = self.get_parks_from_gmaps(center, length_m / 2)
+        # print(len(parks), parks)
+
+        # Filter POIs that are too far away
+        parks = [
+            park for park in parks
+            if geopy.distance.geodesic(origin, park.latlon).meters
+               + geopy.distance.geodesic(park.latlon, dest).meters <= length_m
+        ]
+        # print(len(parks), parks)
+
+        # Map origin, dest, and POIs to actual vertices
+        origin_vid = self.nearest_vertex(origin)
+        dest_vid = self.nearest_vertex(dest)
+        park_nodes = {
+            self.nearest_vertex(park.latlon): park
+            for park in parks
+        }
+        print('ORIGIN:', origin_vid, '; DEST:', dest_vid)
+        pprint(park_nodes)
+        ratings = {vid: park_nodes[vid].rating for vid in park_nodes}
+
+        # Solve APSP between origin, dest, and POIs
+        all_vids = [origin_vid, dest_vid] + list(park_nodes.keys())
+        pairdist = self.all_pairs_shortest_path_costs(all_vids)
+        # TODO if a node is not connected, pairdist may silently omit distances
+        # Sanity check that dest is actually reachable from origin?
+        # Other checks for strongly connected components?
+
+        # Solve orienteering problem from origin to dest
+        bestpath = self.solve_orienteering(ratings, length_m, pairdist,
+                                             origin_vid, dest_vid)
+
+        # Compute the overall route from origin to dest
+        return self.get_route_geojson(bestpath)
+
 
 def midpoint(coord1, coord2):
     """Return midpoint of two lat/lon coordinates."""
     return (coord1[0] + coord2[0]) / 2, (coord1[1] + coord2[1]) / 2
 
 
-if __name__ == '__main__':
+def main():
     origin = (34.140003, -118.122775)  # Caltech
     dest = (34.140707, -118.132212)  # Lake Ave
     length_m = 6000  # Maximum length of path in meters
@@ -206,42 +264,8 @@ if __name__ == '__main__':
         config = json.load(f)
     conn = db_conn.connPool.getconn()
     router = OrienteeringRouter(config['gmapsApiKey'], conn)
+    pprint(router.make_route(origin, dest, length_m))
 
-    # Get points of interest
-    center = midpoint(origin, dest)
-    print('CENTER:', center)
-    parks = router.get_parks_from_gmaps(center, length_m / 2)
-    # print(len(parks), parks)
 
-    # Filter POIs that are too far away
-    parks = [
-        park for park in parks
-        if geopy.distance.geodesic(origin, park.latlon).meters
-           + geopy.distance.geodesic(park.latlon, dest).meters <= length_m
-    ]
-    # print(len(parks), parks)
-
-    # Map origin, dest, and POIs to actual vertices
-    origin_vid = router.nearest_vertex(origin)
-    dest_vid = router.nearest_vertex(dest)
-    park_nodes = {
-        router.nearest_vertex(park.latlon): park
-        for park in parks
-    }
-    print('ORIGIN:', origin_vid, '; DEST:', dest_vid)
-    pprint(park_nodes)
-    ratings = {vid: park_nodes[vid].rating for vid in park_nodes}
-
-    # Solve APSP between origin, dest, and POIs
-    all_vids = [origin_vid, dest_vid] + list(park_nodes.keys())
-    pairdist = router.all_pairs_shortest_path_costs(all_vids)
-    # TODO if a node is not connected, pairdist may silently omit its distances
-    # Sanity check that dest is actually reachable from origin?
-    # Other checks for strongly connected components?
-
-    # Solve orienteering problem on parks
-    bestpath = router.solve_orienteering(ratings, length_m, pairdist,
-                                         origin_vid, dest_vid)
-
-    # Compute the overall route
-    pprint(router.get_route_geojson(bestpath))
+if __name__ == '__main__':
+    main()
