@@ -93,6 +93,74 @@ class OrienteeringRouter:
         return {(start_vid, end_vid): length
                 for (start_vid, end_vid, length) in results}
 
+    def make_orienteering_path(self, node_score: Dict[int, float],
+                               max_distance: float,
+                               pairdist: Dict[Tuple[int, int], float],
+                               origin_vid: int, dest_vid: int,
+                               power_param: float = 4.0, length_param: int = 4
+                               ) -> Tuple[List[int], float, float]:
+        """
+        Make a random path between origin and dest.
+
+        There are two kinds of nodes: "points of interest", and the origin and
+        destination. Scores are only for points of interest, but distances
+        must be for *all* pairs of vertices.
+        :param node_score: Weights of all POIs.
+        :param max_distance: Desired maximum distance.
+        :param pairdist: Map of distances between each pair of nodes, including
+            origin, destination, and POIs.
+        :param origin_vid: Origin id.
+        :param dest_vid: Destination id.
+        Random walk parameters:
+        :param power_param: Configures how desirability is calculated.
+        :param length_param: Configures how many of the top nodes to keep.
+        :return: (List of nodes along path, total score, total distance).
+            The list includes the origin and destination.
+            Return None if we fail to find a path. This can happen if:
+            - The distance from origin to dest > max_distance.
+            - Some vertex cannot reach dest. (Even if the origin can reach dest,
+              it's possible that a later vertex cannot reach dest since the
+              graph is directed.)
+        """
+        path = [origin_vid]
+        score = 0
+        dist = 0
+        visited = set()
+
+        # Make a path
+        while True:
+            # Get feasible nodes, and compute their desirability
+            cur = path[-1]
+            feas = []
+            for v in set(node_score) - visited:
+                try:
+                    if dist + pairdist[(cur, v)] + pairdist[(v, dest_vid)]\
+                            < max_distance:
+                        d = (node_score[v] / pairdist[(cur, v)]) ** power_param
+                        feas.append((d, v))
+                except KeyError:
+                    # Most likely the nodes aren't connected, so no pairdist
+                    pass
+
+            # If no POIs are feasible, go directly to destination
+            if feas == []:
+                path.append(dest_vid)
+                dist += pairdist[(cur, dest_vid)]
+                break
+
+            # Choose next node
+            feas.sort(reverse=True)
+            feas = feas[:length_param]
+            feas_d, feas_v = zip(*feas)
+            nextnode = random.choices(feas_v, feas_d)[0]
+
+            # Advance to next node
+            path.append(nextnode)
+            score += node_score[nextnode]
+            dist += pairdist[(cur, nextnode)]
+            visited.add(nextnode)
+
+
     def solve_orienteering(self, node_score: Dict[int, float],
                            max_distance: float,
                            pairdist: Dict[Tuple[int, int], float],
@@ -120,61 +188,81 @@ class OrienteeringRouter:
         If something crazy happens like the distance from the origin to the
         destination is > max_distance, still return [origin_vid, dest_vid].
         """
+        def make_path() -> Optional[Tuple[List[int], float, float]]:
+            """
+            Make a path from origin to destination.
+            This function may fail and return None. Currently the only reason
+            it could fail is if (origin_vid, dest_vid) not in pairdist,
+            i.e. the origin cannot reach the destination.
+            :return: (List of nodes, score, distance).
+                The list of nodes includes the origin and destination.
+                If something fails, return None.
+            """
+            path = [origin_vid]
+            score = 0
+            dist = 0
+            visited = set()
+
+            # Make a path
+            while True:
+                # Get feasible nodes, and compute their desirability
+                cur = path[-1]
+                feas = []
+                for v in set(node_score) - visited:
+                    try:
+                        if dist + pairdist[(cur, v)] + pairdist[(v, dest_vid)] \
+                                < max_distance:
+                            d = (node_score[v] / pairdist[(cur, v)]) ** power_param
+                            feas.append((d, v))
+                    except KeyError:
+                        # cur cannot reach v, or v cannot reach dest, so no
+                        # pairdist
+                        pass
+
+                # If no POIs are feasible, go directly to destination
+                if feas == []:
+                    path.append(dest_vid)
+                    try:
+                        dist += pairdist[(cur, dest_vid)]
+                        return path, score, dist
+                    except KeyError:
+                        # cur cannot reach dest.
+                        # But we reason backward: how did we get to cur? From
+                        # another node prev. But prev wouldn't have chosen cur
+                        # if cur couldn't reach dest.
+                        # So cur must be the origin, and the origin cannot
+                        # reach dest.
+                        return None
+
+                # Choose next node
+                feas.sort(reverse=True)  # Sort highest -> lowest desirability
+                feas = feas[:length_param]
+                feas_d, feas_v = zip(*feas)
+                nextnode = random.choices(feas_v, feas_d)[0]
+
+                # Advance to next node
+                path.append(nextnode)
+                score += node_score[nextnode]
+                dist += pairdist[(cur, nextnode)]
+                visited.add(nextnode)
+
         # TODO what if max_distance < shortest distance from origin to dest?
         bestpath = [origin_vid, dest_vid]
         bestscore = 0
         bestdist = 0
 
         for trial in range(ntrials):
-            curpath = [origin_vid]
-            curscore = 0
-            curdist = 0
-            visited = set()
-
-            # Make a path
-            while True:
-                # Get feasible nodes, and compute their desirability
-                curnode = curpath[-1]
-                feasible = []
-                for v in set(node_score) - visited:
-                    try:
-                        if curdist + pairdist[(curnode, v)] \
-                                + pairdist[(v, dest_vid)] < max_distance:
-                            d = (node_score[v] / pairdist[(curnode, v)]) ** power_param
-                            feasible.append((d, v))
-                    except KeyError:
-                        # Most likely the nodes aren't connected, so there is
-                        # no pairdist
-                        pass
-
-                # If no POIs are feasible, go directly to destination
-                if feasible == []:
-                    curpath.append(dest_vid)
-                    # TODO: we don't add the curnode-dest distance...
-                    # It risks a KeyError
-                    # Though we still respect the max_distance maximum
-                    # I hope to bugfix by factoring out the code that generates
-                    # one path into its own function someday...
-                    break
-
-                # Choose next node
-                feasible.sort(reverse=True)
-                feasible = feasible[:length_param]
-                feasible_d, feasible_v = zip(*feasible)
-                nextnode = random.choices(feasible_v, feasible_d)[0]
-
-                # Advance to next node
-                curpath.append(nextnode)
-                curscore += node_score[nextnode]
-                curdist += pairdist[(curnode, nextnode)]
-                visited.add(nextnode)
+            res = make_path()
+            if res is None:
+                continue
+            mypath, myscore, mydist = res
 
             # Better score, or same score but shorter path
-            if curscore > bestscore or curscore == bestscore \
-                    and curdist < bestdist:
-                bestpath = curpath
-                bestscore = curscore
-                bestdist = curdist
+            if myscore > bestscore or \
+                    (myscore == bestscore and mydist < bestdist):
+                bestpath = mypath
+                bestscore = myscore
+                bestdist = mydist
                 print('Best path: {}, score={}, dist={}, trial={}'.format(
                     bestpath, bestscore, bestdist, trial))
 
