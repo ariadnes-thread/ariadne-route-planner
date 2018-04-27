@@ -24,6 +24,7 @@ class RoutePlanner(planner_pb2_grpc.RoutePlannerServicer):
         # Lat/lng of origin
         origin = constraints.get('origin')
         destination = constraints.get('destination')
+        length = constraints.get('length')
         if origin is not None and destination is not None:
             orig_lat = float(origin.get('latitude'))
             orig_lng = float(origin.get('longitude'))
@@ -32,7 +33,8 @@ class RoutePlanner(planner_pb2_grpc.RoutePlannerServicer):
             conn = connPool.getconn()
 
             # TODO: Get length from frontend
-            length = 6000  # Maximum length of path in meters
+            if length is None:
+                length = 6000  # Maximum length of path in meters
             with open('config.json') as f:
                 config = json.load(f)
             router = OrienteeringRouter(config['gmapsApiKey'], conn)
