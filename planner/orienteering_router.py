@@ -170,6 +170,27 @@ class OrienteeringRouter:
 
         return bestpath
 
+    def get_route_geojson(self, nodes: List[int]) -> Tuple[str, float]:
+        """
+        Find route through all vertices and return its GeoJSON.
+        :param nodes: List of vertices.
+        :return: (GeoJSON of path, total length of path in meters)
+        """
+        self.cur.execute('''
+        WITH dijkstra AS (
+            SELECT *
+            FROM pgr_dijkstraVia(
+                'SELECT gid AS id, source, target, cost, reverse_cost FROM ways',
+                %s)
+        )
+        SELECT
+            ST_AsGeoJSON(ST_LineMerge(ST_Union(the_geom))) AS geojson, 
+            SUM(ways.length_m) AS length
+        FROM dijkstra
+          JOIN ways ON dijkstra.edge = ways.gid;
+        ''', (nodes,))
+        return self.cur.fetchone()
+
 
 def midpoint(coord1, coord2):
     """Return midpoint of two lat/lon coordinates."""
@@ -217,9 +238,10 @@ if __name__ == '__main__':
     # TODO if a node is not connected, pairdist may silently omit its distances
     # Sanity check that dest is actually reachable from origin?
     # Other checks for strongly connected components?
-    pprint(pairdist)
 
     # Solve orienteering problem on parks
     bestpath = router.solve_orienteering(ratings, length_m, pairdist,
                                          origin_vid, dest_vid)
-    print(bestpath)
+
+    # Compute the overall route
+    pprint(router.get_route_geojson(bestpath))
