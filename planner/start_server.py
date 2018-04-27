@@ -35,6 +35,7 @@ class RoutePlanner(planner_pb2_grpc.RoutePlannerServicer):
             # TODO: Get length from frontend
             if length is None:
                 length = 6000  # Maximum length of path in meters
+            length = int(length)
             with open('config.json') as f:
                 config = json.load(f)
             router = OrienteeringRouter(config['gmapsApiKey'], conn)
