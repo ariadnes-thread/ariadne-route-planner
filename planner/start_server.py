@@ -1,11 +1,11 @@
 from concurrent import futures
 import time
 import json
-
 import grpc
 
 import planner_pb2
 import planner_pb2_grpc
+from orienteering_router import OrienteeringRouter
 
 from db_conn import connPool
 
@@ -18,6 +18,9 @@ class RoutePlanner(planner_pb2_grpc.RoutePlannerServicer):
         data = {}
         constraints = json.loads(request.jsonData)
 
+        print('Received PlanRoute() call. Constraints:')
+        print(constraints)
+
         # Lat/lng of origin
         origin = constraints.get('origin')
         destination = constraints.get('destination')
@@ -26,20 +29,30 @@ class RoutePlanner(planner_pb2_grpc.RoutePlannerServicer):
             orig_lng = origin.get('longitude')
             dest_lat = destination.get('latitude')
             dest_lng = destination.get('longitude')
-
             conn = connPool.getconn()
-            cur = conn.cursor()
-            cur.execute('SELECT * FROM pathFromNearestKnownPoints(%s,%s,%s,%s)', (orig_lng, orig_lat, dest_lng, dest_lat))
-            linestring, length = cur.fetchone()
+
+            # TODO: Get length from frontend
+            length_m = 6000  # Maximum length of path in meters
+            with open('config.json') as f:
+                config = json.load(f)
+            router = OrienteeringRouter(config['gmapsApiKey'], conn)
+            route_geometry = router.make_route((orig_lat, orig_lng), (dest_lat, dest_lng), length_m)
+
+            # Old algo
+            # cur = conn.cursor()
+            # cur.execute('SELECT * FROM pathFromNearestKnownPoints(%s,%s,%s,%s)', (orig_lng, orig_lat, dest_lng, dest_lat))
+            # linestring, length = cur.fetchone()
+            # route_geometry = json.loads(linestring)
+
             connPool.putconn(conn)
-            data['route'] = json.loads(linestring)
+            data['route'] = route_geometry
             data['length'] = length
             json_data = json.dumps(data, separators=(',', ':'))
             return planner_pb2.JsonReply(jsonData=json_data)
         else:
             context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
             context.set_details('Invalid origin or destination!')
-            return planner_pb2.JsonReply()   
+            return planner_pb2.JsonReply()
 
 
 def serve():
