@@ -6,6 +6,7 @@ from typing import *
 import googlemaps
 import db_conn
 import psycopg2
+import geopy.distance
 
 
 class OrienteeringRouter:
@@ -69,17 +70,45 @@ class OrienteeringRouter:
         result = self.cur.fetchone()
         return result[0]
 
+
+def midpoint(coord1, coord2):
+    """Return midpoint of two lat/lon coordinates."""
+    return (coord1[0] + coord2[0]) / 2, (coord1[1] + coord2[1]) / 2
+
 if __name__ == '__main__':
+    origin = (34.140003, -118.122775)  # Caltech
+    dest = (34.140707, -118.132212)  # Lake Ave
+    length_m = 6000  # Maximum length of path in meters
+
+    # # *only valid for Pasadena area*
+    # # Used an online calculator to get m/deg at Pasadena's latitude
+    # m_per_deg_latitude = 110924.90
+    # m_per_deg_longitude = 92232.91
+    # m_per_deg = (m_per_deg_latitude + m_per_deg_longitude) / 2
+    # length_deg = length_m / m_per_deg
+
     with open('config.json') as f:
         config = json.load(f)
-
     conn = db_conn.connPool.getconn()
-
     router = OrienteeringRouter(config['gmapsApiKey'], conn)
-    parks = router.get_parks_from_gmaps((34.145265, -118.130473), 5000)
+
+    # Get points of interest
+    center = midpoint(origin, dest)
+    print('CENTER:', center)
+    parks = router.get_parks_from_gmaps(center, length_m / 2)
+    # print(len(parks), parks)
+
+    # Filter POIs that are too far away
+    parks = [
+        park for park in parks
+        if geopy.distance.geodesic(origin, park.latlon).meters
+           + geopy.distance.geodesic(park.latlon, dest).meters <= length_m
+    ]
+    # print(len(parks), parks)
+
+    # Map POIs to actual vertices
     park_nodes = {
         router.nearest_vertex(park.latlon): park
         for park in parks
     }
     pprint(park_nodes)
-
