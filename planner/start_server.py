@@ -36,7 +36,7 @@ class RoutePlanner(planner_pb2_grpc.RoutePlannerServicer):
             with open('config.json') as f:
                 config = json.load(f)
             router = OrienteeringRouter(config['gmapsApiKey'], conn)
-            route_geometry = router.make_route((orig_lat, orig_lng), (dest_lat, dest_lng), length)
+            route_geometry = json.loads(router.make_route((orig_lat, orig_lng), (dest_lat, dest_lng), length)[0])
 
             # Old algo
             # cur = conn.cursor()
