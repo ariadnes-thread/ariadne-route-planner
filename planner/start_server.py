@@ -32,11 +32,11 @@ class RoutePlanner(planner_pb2_grpc.RoutePlannerServicer):
             conn = connPool.getconn()
 
             # TODO: Get length from frontend
-            length_m = 6000  # Maximum length of path in meters
+            length = 6000  # Maximum length of path in meters
             with open('config.json') as f:
                 config = json.load(f)
             router = OrienteeringRouter(config['gmapsApiKey'], conn)
-            route_geometry = router.make_route((orig_lat, orig_lng), (dest_lat, dest_lng), length_m)
+            route_geometry = router.make_route((orig_lat, orig_lng), (dest_lat, dest_lng), length)
 
             # Old algo
             # cur = conn.cursor()
