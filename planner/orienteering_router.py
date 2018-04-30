@@ -10,10 +10,7 @@ import googlemaps
 import db_conn
 import geopy.distance
 
-sys.path.insert(0, "/Users/rachael/Documents/Spring2018Classes/ariadne-route-planner/")
 from utils import google_utils as GoogleUtils
-sys.path.insert(0, "/Users/rachael/Documents/Spring2018Classes/ariadne-route-planner/planner/")
-
 
 class OrienteeringRouter:
     """

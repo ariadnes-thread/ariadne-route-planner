@@ -72,7 +72,7 @@ def save_to_db():
 
 	# Setup `psycopg` connection, http://initd.org/psycopg/docs/usage.html
 	conn = psycopg2.connect(
-	    host=config["dbHost"]
+	    host=config["dbHost"],
 	    dbname=config["dbName"],
 	    user=config["dbUser"],
 	    password=config["dbPass"],
