@@ -19,9 +19,7 @@ config = ConfigParser()
 with open('config.json') as f:
     config = json.load(f)
 conn = db_conn.connPool.getconn()
-#config.read('./config.ini')
-#GOOGLE_API_KEY = config.get('auth', 'GOOGLE_API_KEY')
-google_places = GooglePlaces('AIzaSyDiEMv9gcpgmmup7kJngwXDnIIuzHdLW4k')
+google_places = GooglePlaces(config["gmapsApiKey"])
 
 print('\n', config['gmapsApiKey'], '\n')
 def zipcode_to_latlong(zipcode):
@@ -40,7 +38,7 @@ def get_pois(lat_lng, radius=15, type_list=['park']):
 	radius: distance in meters within which to return plae results
 	types: What type of point of interest (examples: TYPE_FOOD)
 	"""
-	type_dict = {'park': types.TYPE_FOOD}
+	type_dict = {'park': types.TYPE_PARK}
 
 	new_types = []
 	for t in type_list:
@@ -74,11 +72,11 @@ def save_to_db():
 
 	# Setup `psycopg` connection, http://initd.org/psycopg/docs/usage.html
 	conn = psycopg2.connect(
-	    host=config.get('dbHost'),
-	    dbname=config.get('dbName'),
-	    user=config.get('dbUser'),
-	    password=config.get('dbPass'),
-	    port=config.get('dbPort')
+	    host=config["dbHost"]
+	    dbname=config["dbName"],
+	    user=config["dbUser"],
+	    password=config["dbPass"],
+	    port=config["dbPort"]
 	)
 	cur = conn.cursor()
 
