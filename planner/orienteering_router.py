@@ -27,8 +27,8 @@ class OrienteeringRouter:
         self.conn = conn
         self.cur = conn.cursor()
 
-    def get_parks_from_gmaps(self, location: Tuple[float, float],
-                             radius: float) -> List[GmapsResult]:
+    def get_pois_from_gmaps(self, location: Tuple[float, float],
+                             radius: float, types=['park']) -> List[GmapsResult]:
         """
         Get POIs from Google Maps.
 
@@ -36,13 +36,18 @@ class OrienteeringRouter:
         single API request, and only returns up to 20 places.
         :param location: (lat, lon) pair.
         :param radius: Search radius in meters.
+        :param types: List of the type of POIS being fetched from gmaps
+            (parks, landmarks, coffee shops, etc.)
         :return: List of results.
         """
-        res = self.gmapsclient.places_nearby(
-            location=(34.145265, -118.130473), # lat, lon
-            radius=5000, # meters
-            type='park'
-        )
+        res = []
+        for t in types:
+            query = self.gmapsclient.places_nearby(
+                location=(location[0], location[1]), # lat, lon
+                radius=5000, # meters
+                type=t
+            )
+            res.append(query)
 
         output = []
         for result in res['results']:
@@ -58,6 +63,7 @@ class OrienteeringRouter:
                 pass
 
         return output
+
 
     def nearest_vertex(self, latlon: Tuple[float, float]) -> int:
         """
@@ -213,12 +219,12 @@ class OrienteeringRouter:
         # Get points of interest
         center = midpoint(origin, dest)
         print('CENTER:', center)
-        parks = self.get_parks_from_gmaps(center, length_m / 2)
+        pois = self.get_pois_from_gmaps(center, length_m / 2)
         # print(len(parks), parks)
 
         # Filter POIs that are too far away
-        parks = [
-            park for park in parks
+        pois = [
+            poi for poi in pois
             if geopy.distance.geodesic(origin, park.latlon).meters
                + geopy.distance.geodesic(park.latlon, dest).meters <= length_m
         ]
@@ -227,16 +233,16 @@ class OrienteeringRouter:
         # Map origin, dest, and POIs to actual vertices
         origin_vid = self.nearest_vertex(origin)
         dest_vid = self.nearest_vertex(dest)
-        park_nodes = {
+        poi_nodes = {
             self.nearest_vertex(park.latlon): park
             for park in parks
         }
         print('ORIGIN:', origin_vid, '; DEST:', dest_vid)
         pprint(park_nodes)
-        ratings = {vid: park_nodes[vid].rating for vid in park_nodes}
+        ratings = {vid: park_nodes[vid].rating for vid in poi_nodes}
 
         # Solve APSP between origin, dest, and POIs
-        all_vids = [origin_vid, dest_vid] + list(park_nodes.keys())
+        all_vids = [origin_vid, dest_vid] + list(poi_nodes.keys())
         pairdist = self.all_pairs_shortest_path_costs(all_vids)
         # TODO if a node is not connected, pairdist may silently omit distances
         # Sanity check that dest is actually reachable from origin?
