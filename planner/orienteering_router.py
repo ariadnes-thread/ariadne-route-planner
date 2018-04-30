@@ -1,5 +1,7 @@
 from collections import namedtuple
 import json
+import sys
+
 from pprint import pprint
 import random
 from typing import *
@@ -7,6 +9,10 @@ from typing import *
 import googlemaps
 import db_conn
 import geopy.distance
+
+sys.path.insert(0, "/Users/rachael/Documents/Spring2018Classes/ariadne-route-planner/")
+from utils import google_utils as GoogleUtils
+sys.path.insert(0, "/Users/rachael/Documents/Spring2018Classes/ariadne-route-planner/planner/")
 
 
 class OrienteeringRouter:
@@ -28,7 +34,7 @@ class OrienteeringRouter:
         self.cur = conn.cursor()
 
     def get_pois_from_gmaps(self, location: Tuple[float, float],
-                             radius: float, types=['park']) -> List[GmapsResult]:
+                             radius: float, type_list=['park']) -> List[GmapsResult]:
         """
         Get POIs from Google Maps.
 
@@ -40,23 +46,16 @@ class OrienteeringRouter:
             (parks, landmarks, coffee shops, etc.)
         :return: List of results.
         """
-        res = []
-        for t in types:
-            query = self.gmapsclient.places_nearby(
-                location=(location[0], location[1]), # lat, lon
-                radius=5000, # meters
-                type=t
-            )
-            res.append(query)
-
+        res = GoogleUtils.get_pois({'lat': location[0], 'lng': location[1]}, radius=radius, type_list=['park'])
+        #GoogleUtils.save_to_json(res, file_name='output.txt')
         output = []
-        for result in res['results']:
+
+        for place in res.places:
             try:
                 output.append(self.GmapsResult(
-                    name=result['name'],
-                    latlon=(result['geometry']['location']['lat'],
-                            result['geometry']['location']['lng']),
-                    rating=result['rating']
+                    name=place.name,
+                    latlon=(place.geo_location['lat'], place.geo_location['lon']),
+                    rating=place.rating
                 ))
             except KeyError:
                 # Skip POIs that are missing one of the fields
@@ -220,26 +219,24 @@ class OrienteeringRouter:
         center = midpoint(origin, dest)
         print('CENTER:', center)
         pois = self.get_pois_from_gmaps(center, length_m / 2)
-        # print(len(parks), parks)
 
         # Filter POIs that are too far away
         pois = [
             poi for poi in pois
-            if geopy.distance.geodesic(origin, park.latlon).meters
-               + geopy.distance.geodesic(park.latlon, dest).meters <= length_m
+            if geopy.distance.geodesic(origin, poi.latlon).meters
+               + geopy.distance.geodesic(poi.latlon, dest).meters <= length_m
         ]
-        # print(len(parks), parks)
 
         # Map origin, dest, and POIs to actual vertices
         origin_vid = self.nearest_vertex(origin)
         dest_vid = self.nearest_vertex(dest)
         poi_nodes = {
-            self.nearest_vertex(park.latlon): park
-            for park in parks
+            self.nearest_vertex(poi.latlon): poi
+            for poi in pois
         }
         print('ORIGIN:', origin_vid, '; DEST:', dest_vid)
-        pprint(park_nodes)
-        ratings = {vid: park_nodes[vid].rating for vid in poi_nodes}
+        pprint(poi_nodes)
+        ratings = {vid: poi_nodes[vid].rating for vid in poi_nodes}
 
         # Solve APSP between origin, dest, and POIs
         all_vids = [origin_vid, dest_vid] + list(poi_nodes.keys())
