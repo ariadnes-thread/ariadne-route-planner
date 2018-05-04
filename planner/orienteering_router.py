@@ -11,6 +11,7 @@ import geopy.distance
 
 from utils import google_utils as GoogleUtils
 
+
 class OrienteeringRouter:
     """
     Router that makes routes by visiting nice vertices.
@@ -30,7 +31,7 @@ class OrienteeringRouter:
         self.cur = conn.cursor()
 
     def get_pois_from_gmaps(self, location: Tuple[float, float],
-                             radius: float, type_list: List[str]) -> List[GmapsResult]:
+                            radius: float, type_list=None) -> List[GmapsResult]:
         """
         Get POIs from Google Maps.
 
@@ -38,12 +39,14 @@ class OrienteeringRouter:
         single API request, and only returns up to 20 places.
         :param location: (lat, lon) pair.
         :param radius: Search radius in meters.
-        :param types: List of the type of POIS being fetched from gmaps
+        :param type_list: List of the type of POIS being fetched from gmaps
             (parks, landmarks, coffee shops, etc.)
         :return: List of results.
         """
-        GoogleHelper = GoogleUtils.GoogleHelper() 
-        res = GoogleHelper.get_pois({'lat': location[0], 'lng': location[1]}, radius=radius, type_list=[types.TYPE_PARK])
+        if type_list is None:
+            type_list = [types.TYPE_PARK]
+        GoogleHelper = GoogleUtils.GoogleHelper()
+        res = GoogleHelper.get_pois({'lat': location[0], 'lng': location[1]}, radius=radius, type_list=type_list)
         output = []
 
         for place in res.places:
@@ -64,7 +67,6 @@ class OrienteeringRouter:
                 pass
 
         return output
-
 
     def nearest_vertex(self, latlon: Tuple[float, float]) -> int:
         """
@@ -127,6 +129,7 @@ class OrienteeringRouter:
         If something crazy happens like the distance from the origin to the
         destination is > max_distance, still return [origin_vid, dest_vid].
         """
+
         def make_path() -> Optional[Tuple[List[int], float, float]]:
             """
             Make a path from origin to destination.
@@ -146,20 +149,20 @@ class OrienteeringRouter:
             while True:
                 # Get feasible nodes, and compute their desirability
                 cur = path[-1]
-                feas = []
+                feasible_nodes = []
                 for v in set(node_score) - visited:
                     try:
                         if dist + pairdist[(cur, v)] + pairdist[(v, dest_vid)] \
                                 < max_distance:
                             d = (node_score[v] / pairdist[(cur, v)]) ** power_param
-                            feas.append((d, v))
+                            feasible_nodes.append((d, v))
                     except KeyError:
                         # cur cannot reach v, or v cannot reach dest, so no
                         # pairdist
                         pass
 
                 # If no POIs are feasible, go directly to destination
-                if feas == []:
+                if not feasible_nodes:
                     path.append(dest_vid)
                     try:
                         dist += pairdist[(cur, dest_vid)]
@@ -174,9 +177,9 @@ class OrienteeringRouter:
                         return None
 
                 # Choose next node
-                feas.sort(reverse=True)  # Sort highest -> lowest desirability
-                feas = feas[:length_param]
-                feas_d, feas_v = zip(*feas)
+                feasible_nodes.sort(reverse=True)  # Sort highest -> lowest desirability
+                feasible_nodes = feasible_nodes[:length_param]
+                feas_d, feas_v = zip(*feasible_nodes)
                 nextnode = random.choices(feas_v, feas_d)[0]
 
                 # Advance to next node
@@ -245,8 +248,8 @@ class OrienteeringRouter:
         # Filter POIs that are too far away
         pois = [
             poi for poi in pois
-            if geopy.distance.geodesic(origin, poi.latlon).meters
-               + geopy.distance.geodesic(poi.latlon, dest).meters <= length_m
+            if geopy.distance.geodesic(origin, poi.latlon).meters +
+               geopy.distance.geodesic(poi.latlon, dest).meters <= length_m
         ]
 
         # Map origin, dest, and POIs to actual vertices
@@ -269,7 +272,7 @@ class OrienteeringRouter:
 
         # Solve orienteering problem from origin to dest
         bestpath = self.solve_orienteering(ratings, length_m, pairdist,
-                                             origin_vid, dest_vid)
+                                           origin_vid, dest_vid)
 
         # Compute the overall route from origin to dest
         return self.get_route_geojson(bestpath)
@@ -279,8 +282,8 @@ def midpoint(coord1, coord2):
     """Return midpoint of two lat/lon coordinates."""
     return (coord1[0] + coord2[0]) / 2, (coord1[1] + coord2[1]) / 2
 
+
 def main():
-    
     origin = (34.140003, -118.122775)  # Caltech
     dest = (34.140707, -118.132212)  # Lake Ave
     length_m = 6000  # Maximum length of path in meters
@@ -294,4 +297,5 @@ def main():
 
 if __name__ == '__main__':
     import db_conn
+
     main()
