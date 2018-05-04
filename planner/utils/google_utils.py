@@ -17,18 +17,13 @@ class GoogleHelper:
 	"""
 	Helper class for accessing the google API
 	"""
-	def __init__(self, gmaps_api_key=None, conn=None):
-		import db_conn
+	def __init__(self, gmaps_api_key=None):
 		if gmaps_api_key is None:
 			config = ConfigParser()
 			with open('config.json') as f:
 			    config = json.load(f)
 			gmaps_api_key = config["gmapsApiKey"]
-		if conn is None:
-			conn = db_conn.connPool.getconn()
 
-		self.conn = conn
-		self.cur = conn.cursor()
 		self.google_places = GooglePlaces(config["gmapsApiKey"])
 
 
@@ -37,25 +32,20 @@ class GoogleHelper:
 			json.dump(data, outfile)
 
 
-	def get_pois(self, lat_lng, radius=15, type_list=['park']):
+	def get_pois(self, lat_lng, radius=15, type_list=[types.TYPE_PARK]):
 		"""
 		location: must be given in latitutde-longitude
 		radius: distance in meters within which to return plae results
 		types: What type of point of interest (examples: TYPE_FOOD)
 		"""
-		type_dict = {'park': types.TYPE_PARK}
-
-		new_types = []
-		for t in type_list:
-			new_types.append(type_dict[t])
-		query_result = self.google_places.nearby_search(lat_lng=lat_lng, keyword='park', radius=2000)
+		query_result = self.google_places.nearby_search(lat_lng=lat_lng, types=type_list, radius=2000)
 		
 		if query_result.has_attributions:
 			return query_result.html_attributions
 
 		return query_result
 
-	def get_pois_features(self, place_id):
+	def get_pois_features(self, place_id: str):
 		"""
 		Gets safety, elevation, other attributes for a given point of interest
 		"""
@@ -70,10 +60,3 @@ class GoogleHelper:
 		query_result = self.google_places.get_place(place_id)
 
 		return query_result.rating
-
-	def save_to_db(self):
-		# Commit changes to the database (if any) and close connection
-		self.conn.commit()
-		self.cur.close()
-		self.conn.close()
-

@@ -4,6 +4,7 @@ import json
 from pprint import pprint
 import random
 from typing import *
+from googleplaces import types
 
 import googlemaps
 import geopy.distance
@@ -42,18 +43,23 @@ class OrienteeringRouter:
         :return: List of results.
         """
         GoogleHelper = GoogleUtils.GoogleHelper() 
-        res = GoogleHelper.get_pois({'lat': location[0], 'lng': location[1]}, radius=radius, type_list=['park'])
-        #GoogleUtils.save_to_json(res, file_name='output.txt')
+        res = GoogleHelper.get_pois({'lat': location[0], 'lng': location[1]}, radius=radius, type_list=[types.TYPE_PARK])
         output = []
 
         for place in res.places:
             try:
+                place.get_details()
+
+                # TODO: rating works but really slows things down. Speed up?
+                rating = place.rating
+                print(rating, '\n')
                 output.append(self.GmapsResult(
                     name=place.name,
-                    latlon=(place.geo_location['lat'], place.geo_location['lon']),
-                    rating=place.rating
+                    latlon=(place.geo_location['lat'], place.geo_location['lng']),
+                    rating=rating
                 ))
             except KeyError:
+                print('Key error thrown \n')
                 # Skip POIs that are missing one of the fields
                 pass
 
@@ -234,7 +240,7 @@ class OrienteeringRouter:
         # Get points of interest
         center = midpoint(origin, dest)
         print('CENTER:', center)
-        pois = self.get_pois_from_gmaps(center, length_m / 2, ['parks'])
+        pois = self.get_pois_from_gmaps(center, length_m / 2, [types.TYPE_PARK])
 
         # Filter POIs that are too far away
         pois = [
