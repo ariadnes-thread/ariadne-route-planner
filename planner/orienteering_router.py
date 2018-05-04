@@ -214,7 +214,7 @@ class OrienteeringRouter:
                 %s)
         )
         SELECT
-            ST_AsGeoJSON(ST_LineMerge(ST_Union(the_geom))) AS geojson, 
+            ST_AsGeoJSON(ST_MakeLine(CASE WHEN node = source THEN the_geom ELSE ST_Reverse(the_geom) END)) AS geojson, 
             SUM(ways.length_m) AS length
         FROM dijkstra
           JOIN ways ON dijkstra.edge = ways.gid;

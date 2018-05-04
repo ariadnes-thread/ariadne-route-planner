@@ -24,7 +24,7 @@ class RoutePlanner(planner_pb2_grpc.RoutePlannerServicer):
         # Lat/lng of origin
         origin = constraints.get('origin')
         destination = constraints.get('destination')
-        length = constraints.get('length')
+        desired_length = constraints.get('desiredLength')
         if origin is not None and destination is not None:
             orig_lat = float(origin.get('latitude'))
             orig_lng = float(origin.get('longitude'))
@@ -33,19 +33,19 @@ class RoutePlanner(planner_pb2_grpc.RoutePlannerServicer):
             conn = connPool.getconn()
 
             # TODO: Get length from frontend
-            if length is None:
-                length = 6000  # Maximum length of path in meters
-            length = int(length)
             with open('config.json') as f:
                 config = json.load(f)
-            router = OrienteeringRouter(config['gmapsApiKey'], conn)
-            route_geometry = json.loads(router.make_route((orig_lat, orig_lng), (dest_lat, dest_lng), length)[0])
 
-            # Old algo
-            # cur = conn.cursor()
-            # cur.execute('SELECT * FROM pathFromNearestKnownPoints(%s,%s,%s,%s)', (orig_lng, orig_lat, dest_lng, dest_lat))
-            # linestring, length = cur.fetchone()
-            # route_geometry = json.loads(linestring)
+            if desired_length:
+                router = OrienteeringRouter(config['gmapsApiKey'], conn)
+                linestring, length = router.make_route((orig_lat, orig_lng), (dest_lat, dest_lng), desired_length)
+                route_geometry = json.loads(linestring)
+            else:
+                cur = conn.cursor()
+                cur.execute('SELECT * FROM pathFromNearestKnownPoints(%s,%s,%s,%s)',
+                            (orig_lng, orig_lat, dest_lng, dest_lat))
+                linestring, length = cur.fetchone()
+                route_geometry = json.loads(linestring)
 
             connPool.putconn(conn)
             data['route'] = route_geometry
