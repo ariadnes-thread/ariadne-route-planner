@@ -273,9 +273,6 @@ def midpoint(coord1, coord2):
     """Return midpoint of two lat/lon coordinates."""
     return (coord1[0] + coord2[0]) / 2, (coord1[1] + coord2[1]) / 2
 
-def get_time():
-    pass
-
 def main():
     
     origin = (34.140003, -118.122775)  # Caltech
