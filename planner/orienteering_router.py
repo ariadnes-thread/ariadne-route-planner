@@ -1,12 +1,16 @@
 from collections import namedtuple
 import json
+
 from pprint import pprint
 import random
 from typing import *
+from googleplaces import GooglePlacesAttributeError
+import utils.poi_types as poi_types
 
 import googlemaps
-import db_conn
 import geopy.distance
+
+from utils import google_utils as GoogleUtils
 
 
 class OrienteeringRouter:
@@ -27,8 +31,8 @@ class OrienteeringRouter:
         self.conn = conn
         self.cur = conn.cursor()
 
-    def get_parks_from_gmaps(self, location: Tuple[float, float],
-                             radius: float) -> List[GmapsResult]:
+    def get_pois_from_gmaps(self, location: Tuple[float, float],
+                            radius: float, type_list) -> List[GmapsResult]:
         """
         Get POIs from Google Maps.
 
@@ -36,25 +40,28 @@ class OrienteeringRouter:
         single API request, and only returns up to 20 places.
         :param location: (lat, lon) pair.
         :param radius: Search radius in meters.
+        :param type_list: List of the type of POIS being fetched from gmaps
+            (parks, landmarks, coffee shops, etc.)
         :return: List of results.
         """
-        res = self.gmapsclient.places_nearby(
-            location=(34.145265, -118.130473), # lat, lon
-            radius=5000, # meters
-            type='park'
-        )
-
+        GoogleHelper = GoogleUtils.GoogleHelper()
+        places = GoogleHelper.get_pois({'lat': location[0], 'lng': location[1]},
+                                       radius=radius, type_list=type_list)
         output = []
-        for result in res['results']:
+        for place in places:
             try:
+                # Note: some places don't seem to have ratings.
+                # These return a GooglePlacesAttributeError as caught below,
+                # and are skipped.
+                # Convert rating and latlon from Decimal to float.
                 output.append(self.GmapsResult(
-                    name=result['name'],
-                    latlon=(result['geometry']['location']['lat'],
-                            result['geometry']['location']['lng']),
-                    rating=result['rating']
+                    name=place.name,
+                    latlon=(float(place.geo_location['lat']),
+                            float(place.geo_location['lng'])),
+                    rating=float(place.rating)
                 ))
-            except KeyError:
-                # Skip POIs that are missing one of the fields
+            except GooglePlacesAttributeError:
+                # Name, location, or rating wasn't available. Skip it
                 pass
 
         return output
@@ -120,6 +127,7 @@ class OrienteeringRouter:
         If something crazy happens like the distance from the origin to the
         destination is > max_distance, still return [origin_vid, dest_vid].
         """
+
         def make_path() -> Optional[Tuple[List[int], float, float]]:
             """
             Make a path from origin to destination.
@@ -139,20 +147,20 @@ class OrienteeringRouter:
             while True:
                 # Get feasible nodes, and compute their desirability
                 cur = path[-1]
-                feas = []
+                feasible_nodes = []
                 for v in set(node_score) - visited:
                     try:
                         if dist + pairdist[(cur, v)] + pairdist[(v, dest_vid)] \
                                 < max_distance:
                             d = (node_score[v] / pairdist[(cur, v)]) ** power_param
-                            feas.append((d, v))
+                            feasible_nodes.append((d, v))
                     except KeyError:
                         # cur cannot reach v, or v cannot reach dest, so no
                         # pairdist
                         pass
 
                 # If no POIs are feasible, go directly to destination
-                if feas == []:
+                if not feasible_nodes:
                     path.append(dest_vid)
                     try:
                         dist += pairdist[(cur, dest_vid)]
@@ -167,9 +175,9 @@ class OrienteeringRouter:
                         return None
 
                 # Choose next node
-                feas.sort(reverse=True)  # Sort highest -> lowest desirability
-                feas = feas[:length_param]
-                feas_d, feas_v = zip(*feas)
+                feasible_nodes.sort(reverse=True)  # Sort highest -> lowest desirability
+                feasible_nodes = feasible_nodes[:length_param]
+                feas_d, feas_v = zip(*feasible_nodes)
                 nextnode = random.choices(feas_v, feas_d)[0]
 
                 # Advance to next node
@@ -233,30 +241,29 @@ class OrienteeringRouter:
         # Get points of interest
         center = midpoint(origin, dest)
         print('CENTER:', center)
-        parks = self.get_parks_from_gmaps(center, length_m / 2)
-        # print(len(parks), parks)
+        pois = self.get_pois_from_gmaps(center, length_m / 2,
+            [poi_types.TYPE_PARK, poi_types.TYPE_RESTAURANT])
 
         # Filter POIs that are too far away
-        parks = [
-            park for park in parks
-            if geopy.distance.geodesic(origin, park.latlon).meters
-               + geopy.distance.geodesic(park.latlon, dest).meters <= length_m
+        pois = [
+            poi for poi in pois
+            if geopy.distance.geodesic(origin, poi.latlon).meters +
+               geopy.distance.geodesic(poi.latlon, dest).meters <= length_m
         ]
-        # print(len(parks), parks)
 
         # Map origin, dest, and POIs to actual vertices
         origin_vid = self.nearest_vertex(origin)
         dest_vid = self.nearest_vertex(dest)
-        park_nodes = {
-            self.nearest_vertex(park.latlon): park
-            for park in parks
+        poi_nodes = {
+            self.nearest_vertex(poi.latlon): poi
+            for poi in pois
         }
         print('ORIGIN:', origin_vid, '; DEST:', dest_vid)
-        pprint(park_nodes)
-        ratings = {vid: park_nodes[vid].rating for vid in park_nodes}
+        pprint(poi_nodes)
+        ratings = {vid: poi_nodes[vid].rating for vid in poi_nodes}
 
         # Solve APSP between origin, dest, and POIs
-        all_vids = [origin_vid, dest_vid] + list(park_nodes.keys())
+        all_vids = [origin_vid, dest_vid] + list(poi_nodes.keys())
         pairdist = self.all_pairs_shortest_path_costs(all_vids)
         # TODO if a node is not connected, pairdist may silently omit distances
         # Sanity check that dest is actually reachable from origin?
@@ -264,7 +271,7 @@ class OrienteeringRouter:
 
         # Solve orienteering problem from origin to dest
         bestpath = self.solve_orienteering(ratings, length_m, pairdist,
-                                             origin_vid, dest_vid)
+                                           origin_vid, dest_vid)
 
         # Compute the overall route from origin to dest
         return self.get_route_geojson(bestpath)
@@ -288,4 +295,6 @@ def main():
 
 
 if __name__ == '__main__':
+    import db_conn
+
     main()
