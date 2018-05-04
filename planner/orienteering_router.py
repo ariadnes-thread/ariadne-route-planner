@@ -43,7 +43,8 @@ class OrienteeringRouter:
             (parks, landmarks, coffee shops, etc.)
         :return: List of results.
         """
-        res = GoogleUtils.get_pois({'lat': location[0], 'lng': location[1]}, radius=radius, type_list=['park'])
+        GoogleHelper = GoogleUtils.GoogleHelper() 
+        res = GoogleHelper.get_pois({'lat': location[0], 'lng': location[1]}, radius=radius, type_list=['park'])
         #GoogleUtils.save_to_json(res, file_name='output.txt')
         output = []
 
@@ -273,7 +274,6 @@ class OrienteeringRouter:
 def midpoint(coord1, coord2):
     """Return midpoint of two lat/lon coordinates."""
     return (coord1[0] + coord2[0]) / 2, (coord1[1] + coord2[1]) / 2
-
 
 def main():
     origin = (34.140003, -118.122775)  # Caltech
