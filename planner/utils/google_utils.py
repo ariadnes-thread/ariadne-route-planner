@@ -8,10 +8,9 @@ Uses the python-google-places wrapper:
 https://github.com/slimkrazy/python-google-places
 """
 
-from googleplaces import GooglePlaces, types, lang
+from googleplaces import GooglePlaces, types
 from configparser import ConfigParser
 import psycopg2
-import db_conn
 import json
 
 class GoogleHelper:
@@ -19,7 +18,7 @@ class GoogleHelper:
 	Helper class for accessing the google API
 	"""
 	def __init__(self, gmaps_api_key=None, conn=None):
-
+		import db_conn
 		if gmaps_api_key is None:
 			config = ConfigParser()
 			with open('config.json') as f:
@@ -31,7 +30,7 @@ class GoogleHelper:
 		self.conn = conn
 		self.cur = conn.cursor()
 		self.google_places = GooglePlaces(config["gmapsApiKey"])
-		
+
 
 	def save_to_json(self, data, file_name='output.txt'):
 		with open(file_name, 'w') as outfile:

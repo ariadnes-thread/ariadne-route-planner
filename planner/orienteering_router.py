@@ -1,13 +1,11 @@
 from collections import namedtuple
 import json
-import sys
 
 from pprint import pprint
 import random
 from typing import *
 
 import googlemaps
-import db_conn
 import geopy.distance
 
 from utils import google_utils as GoogleUtils
@@ -31,7 +29,7 @@ class OrienteeringRouter:
         self.cur = conn.cursor()
 
     def get_pois_from_gmaps(self, location: Tuple[float, float],
-                             radius: float, type_list=['park']) -> List[GmapsResult]:
+                             radius: float, type_list: List[str]) -> List[GmapsResult]:
         """
         Get POIs from Google Maps.
 
@@ -236,7 +234,7 @@ class OrienteeringRouter:
         # Get points of interest
         center = midpoint(origin, dest)
         print('CENTER:', center)
-        pois = self.get_pois_from_gmaps(center, length_m / 2)
+        pois = self.get_pois_from_gmaps(center, length_m / 2, ['parks'])
 
         # Filter POIs that are too far away
         pois = [
@@ -275,7 +273,11 @@ def midpoint(coord1, coord2):
     """Return midpoint of two lat/lon coordinates."""
     return (coord1[0] + coord2[0]) / 2, (coord1[1] + coord2[1]) / 2
 
+def get_time():
+    pass
+
 def main():
+    
     origin = (34.140003, -118.122775)  # Caltech
     dest = (34.140707, -118.132212)  # Lake Ave
     length_m = 6000  # Maximum length of path in meters
@@ -288,4 +290,5 @@ def main():
 
 
 if __name__ == '__main__':
+    import db_conn
     main()
