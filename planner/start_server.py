@@ -30,6 +30,7 @@ class RoutePlanner(planner_pb2_grpc.RoutePlannerServicer):
             orig_lng = float(origin.get('longitude'))
             dest_lat = float(destination.get('latitude'))
             dest_lng = float(destination.get('longitude'))
+            desired_length = float(desired_length)
             conn = connPool.getconn()
 
             # TODO: Get length from frontend
