@@ -52,4 +52,4 @@ def latlong_to_address(lat, lon):
 #zipcode_to_latlong(91110)
 #latlong_to_address(52.509669, 13.376294)
 #print(address_to_latlong("1320 San Pasqual St Pasadena"))
-latlong_to_zipcode(52.509669, 13.376294)
+#latlong_to_zipcode(52.509669, 13.376294)
