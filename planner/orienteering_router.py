@@ -4,7 +4,8 @@ import json
 from pprint import pprint
 import random
 from typing import *
-from googleplaces import types
+from googleplaces import GooglePlacesAttributeError
+import utils.poi_types as poi_types
 
 import googlemaps
 import geopy.distance
@@ -44,26 +45,25 @@ class OrienteeringRouter:
         :return: List of results.
         """
         if type_list is None:
-            type_list = [types.TYPE_PARK]
+            type_list = [poi_types.TYPE_PARK]
         GoogleHelper = GoogleUtils.GoogleHelper()
-        res = GoogleHelper.get_pois({'lat': location[0], 'lng': location[1]}, radius=radius, type_list=type_list)
+        res = GoogleHelper.get_pois({'lat': location[0], 'lng': location[1]},
+                                    radius=radius, type_list=type_list)
         output = []
-
         for place in res.places:
             try:
-                place.get_details()
-
-                # TODO: rating works but really slows things down. Speed up?
-                rating = place.rating
-                print(rating, '\n')
+                # Note: some places don't seem to have ratings.
+                # These return a GooglePlacesAttributeError as caught below,
+                # and are skipped.
+                # Convert rating and location from Decimal to float.
                 output.append(self.GmapsResult(
                     name=place.name,
-                    latlon=(place.geo_location['lat'], place.geo_location['lng']),
-                    rating=rating
+                    latlon=(float(place.geo_location['lat']),
+                            float(place.geo_location['lng'])),
+                    rating=float(place.rating)
                 ))
-            except KeyError:
-                print('Key error thrown \n')
-                # Skip POIs that are missing one of the fields
+            except GooglePlacesAttributeError:
+                # Name, location, or rating wasn't available. Skip it
                 pass
 
         return output
@@ -243,7 +243,7 @@ class OrienteeringRouter:
         # Get points of interest
         center = midpoint(origin, dest)
         print('CENTER:', center)
-        pois = self.get_pois_from_gmaps(center, length_m / 2, [types.TYPE_PARK])
+        pois = self.get_pois_from_gmaps(center, length_m / 2, [poi_types.TYPE_PARK])
 
         # Filter POIs that are too far away
         pois = [
