@@ -30,20 +30,23 @@ class GoogleHelper:
 
         self.google_places = GooglePlaces(gmaps_api_key)
 
-    def get_pois(self, lat_lng, radius=15, type_list=None):
+    def get_pois(self, lat_lng, radius, type_list):
         """
         location: must be given in latitutde-longitude
         radius: distance in meters within which to return plae results
         types: What type of point of interest (examples: TYPE_FOOD)
+        return: List of GooglePlacesSearchResults.
         """
-        if type_list is None:
-            type_list = [types.TYPE_PARK]
-        query_result = self.google_places.nearby_search(lat_lng=lat_lng, types=type_list, radius=2000)
+        results = []
+        for t in type_list:
+            res = self.google_places.nearby_search(
+                lat_lng=lat_lng, type=t, radius=radius)
+            results.extend(res.places)
 
-        if query_result.has_attributions:
-            return query_result.html_attributions
+        # if query_result.has_attributions:
+        #     return query_result.html_attributions
 
-        return query_result
+        return results
 
     def get_pois_features(self, place_id: str):
         """

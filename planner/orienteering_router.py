@@ -32,7 +32,7 @@ class OrienteeringRouter:
         self.cur = conn.cursor()
 
     def get_pois_from_gmaps(self, location: Tuple[float, float],
-                            radius: float, type_list=None) -> List[GmapsResult]:
+                            radius: float, type_list) -> List[GmapsResult]:
         """
         Get POIs from Google Maps.
 
@@ -44,18 +44,16 @@ class OrienteeringRouter:
             (parks, landmarks, coffee shops, etc.)
         :return: List of results.
         """
-        if type_list is None:
-            type_list = [poi_types.TYPE_PARK]
         GoogleHelper = GoogleUtils.GoogleHelper()
-        res = GoogleHelper.get_pois({'lat': location[0], 'lng': location[1]},
-                                    radius=radius, type_list=type_list)
+        places = GoogleHelper.get_pois({'lat': location[0], 'lng': location[1]},
+                                       radius=radius, type_list=type_list)
         output = []
-        for place in res.places:
+        for place in places:
             try:
                 # Note: some places don't seem to have ratings.
                 # These return a GooglePlacesAttributeError as caught below,
                 # and are skipped.
-                # Convert rating and location from Decimal to float.
+                # Convert rating and latlon from Decimal to float.
                 output.append(self.GmapsResult(
                     name=place.name,
                     latlon=(float(place.geo_location['lat']),
@@ -243,7 +241,8 @@ class OrienteeringRouter:
         # Get points of interest
         center = midpoint(origin, dest)
         print('CENTER:', center)
-        pois = self.get_pois_from_gmaps(center, length_m / 2, [poi_types.TYPE_PARK])
+        pois = self.get_pois_from_gmaps(center, length_m / 2,
+            [poi_types.TYPE_PARK, poi_types.TYPE_RESTAURANT])
 
         # Filter POIs that are too far away
         pois = [
