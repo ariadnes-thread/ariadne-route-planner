@@ -1,13 +1,16 @@
+import logging
 from concurrent import futures
 import time
 import json
 import grpc
+
 import planner_pb2
 import planner_pb2_grpc
 from config import config
-from orienteering_router import OrienteeringRouter
+from routers.orienteering_router import OrienteeringRouter
 
 from db_conn import connPool
+from routers.point2point_router import Point2PointRouter
 
 _ONE_DAY_IN_SECONDS = 60 * 60 * 24
 
@@ -30,18 +33,16 @@ class RoutePlanner(planner_pb2_grpc.RoutePlannerServicer):
             orig_lng = float(origin.get('longitude'))
             dest_lat = float(destination.get('latitude'))
             dest_lng = float(destination.get('longitude'))
-            conn = connPool.getconn()
 
-            if desired_length:
-                desired_length = float(desired_length)
-                router = OrienteeringRouter(config['gmapsApiKey'], conn)
+            with connPool.getconn() as conn:
+                # If exception is raised in this block, rollback transaction, else commit.
+                if desired_length:
+                    desired_length = float(desired_length)
+                    router = OrienteeringRouter(conn, config['gmapsApiKey'])
+                else:
+                    router = Point2PointRouter(conn)
+
                 linestring, length = router.make_route((orig_lat, orig_lng), (dest_lat, dest_lng), desired_length)
-                route_geometry = json.loads(linestring)
-            else:
-                cur = conn.cursor()
-                cur.execute('SELECT * FROM pathFromNearestKnownPoints(%s,%s,%s,%s)',
-                            (orig_lng, orig_lat, dest_lng, dest_lat))
-                linestring, length = cur.fetchone()
                 route_geometry = json.loads(linestring)
 
             connPool.putconn(conn)
@@ -68,4 +69,5 @@ def serve():
 
 
 if __name__ == '__main__':
+    logging.basicConfig(level=logging.INFO)
     serve()
