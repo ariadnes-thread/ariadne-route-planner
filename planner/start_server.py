@@ -2,9 +2,9 @@ from concurrent import futures
 import time
 import json
 import grpc
-
 import planner_pb2
 import planner_pb2_grpc
+from config import config
 from orienteering_router import OrienteeringRouter
 
 from db_conn import connPool
@@ -31,10 +31,6 @@ class RoutePlanner(planner_pb2_grpc.RoutePlannerServicer):
             dest_lat = float(destination.get('latitude'))
             dest_lng = float(destination.get('longitude'))
             conn = connPool.getconn()
-
-            # TODO: Get length from frontend
-            with open('config.json') as f:
-                config = json.load(f)
 
             if desired_length:
                 desired_length = float(desired_length)

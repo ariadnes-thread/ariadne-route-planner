@@ -24,8 +24,7 @@ class GoogleHelper:
 
     def __init__(self, gmaps_api_key=None):
         if gmaps_api_key is None:
-            with open('config.json') as f:
-                config = json.load(f)
+            from config import config
             gmaps_api_key = config["gmapsApiKey"]
 
         self.google_places = GooglePlaces(gmaps_api_key)

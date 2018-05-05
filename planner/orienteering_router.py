@@ -1,6 +1,5 @@
 from collections import namedtuple
-import json
-
+from config import config
 from pprint import pprint
 import random
 from typing import *
@@ -287,8 +286,6 @@ def main():
     dest = (34.140707, -118.132212)  # Lake Ave
     length_m = 6000  # Maximum length of path in meters
 
-    with open('config.json') as f:
-        config = json.load(f)
     conn = db_conn.connPool.getconn()
     router = OrienteeringRouter(config['gmapsApiKey'], conn)
     pprint(router.make_route(origin, dest, length_m))
