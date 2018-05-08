@@ -89,22 +89,29 @@ def nearest_vertex(conn, latlon: Tuple[float, float]) -> int:
         return result[0]
 
 
-def make_edges_sql(conn, green_pref: float, popul_pref: float,
+def make_edges_sql(conn, edge_prefs: Dict[str, float],
                    max_discount: float = 0.7) -> str:
     """
-    Make edges_sql query with adjusted edge costs. It's suitable for
+    Make edges_sql query from map of edge preferences. It's suitable for
     use in pgr_dijkstra calls.
     :param conn:
-    :param green_pref: Strength of greenery preference, in [0, 1].
-    :param popul_pref: Strength of popularity preference, in [0, 1].
-        green_pref and popul_pref must sum to no more than 1.
-    :param max_discount: Maximum fraction that an edge's cost can be
-        discounted.
+    :param edge_prefs: Map of edge preferences.
     :return: edges_sql string.
     """
-    assert 0 <= green_pref + popul_pref <= 1
+    if sum(edge_prefs.values()) == 0:
+        # No edge preferences
+        return \
+            '''
+            SELECT
+              gid AS id, source, target,
+              length_m AS cost,
+              length_m * SIGN(reverse_cost) AS reverse_cost
+            FROM ways
+            '''
 
     with conn.cursor() as cur:
+        # Adjust edge costs by their greenery/popularity values, weighted by
+        # preferences
         return cur.mogrify(
             '''
             SELECT
@@ -115,12 +122,15 @@ def make_edges_sql(conn, green_pref: float, popul_pref: float,
               INNER JOIN (
                 SELECT
                   gid, 
-                  (1 - %s * (%s * greenery - %s * popularity_highres)) 
+                  (1 - %s * ((%s * greenery + %s * popularity_highres)) / %s) 
                     AS multiplier
                 FROM ways_metadata                  
               ) AS ways_multipliers USING (gid)
             ''',
-            (max_discount, green_pref, popul_pref)
+            (max_discount,
+             edge_prefs.get('green', 0),
+             edge_prefs.get('popularity', 0),
+             sum(edge_prefs.values()))
         ).decode()
 
 
@@ -323,7 +333,7 @@ class OrienteeringRouter:
 
     def make_route(self, origin_latlons: List[Tuple[float, float]],
                    dest_latlons: List[Tuple[float, float]], length_m: float,
-                   poi_prefs: Dict[str, float], edge_prefs: List[str],
+                   poi_prefs: Dict[str, float], edge_prefs: Dict[str, float],
                    noptions: int) -> List[RouteResult]:
         """
         Make routes of at most a given length while visitng points of interest.
@@ -332,8 +342,8 @@ class OrienteeringRouter:
         :param length_m: Desired length in meters.
         :param poi_prefs: Map of poi types to their relative weights. The keys
             are a subset of what's in poi_types.py.
-        :param edge_prefs: List of edge preferences. A subset of
-            ['green', 'popularity'].
+        :param edge_prefs: Map of edge types to their weights. The keys are a
+            subset of ['green', 'popularity'].
         :param noptions: Number of route suggestions to return.
         :return: List of routes. Each route is a RouteResult, containing
             (GeoJSON, score, total length in meters).
@@ -364,15 +374,8 @@ class OrienteeringRouter:
         pprint(poi_nodes)
         poi_score = {vid: poi_nodes[vid].score for vid in poi_nodes}
 
-        # Resolve edge preferences
-        green_pref, popul_pref = {
-            (True, True): (0.5, 0.5),
-            (True, False): (1, 0),
-            (False, True): (0, 1),
-            (False, False): (0, 0)
-        }[('green' in edge_prefs, 'popularity' in edge_prefs)]
-        # Compute edges_sql
-        edges_sql = make_edges_sql(self.conn, green_pref, popul_pref)
+        # Compute edges_sql based on edge preferences
+        edges_sql = make_edges_sql(self.conn, edge_prefs)
 
         # Compute pairwise distances between origins, dests, and POIs
         pairdist = pairwise_shortest_path_costs(
@@ -414,12 +417,16 @@ def main():
         poi_types.TYPE_PARK: 2,
         poi_types.TYPE_ART_GALLERY: 5
     }
-    edge_prefs = ['popularity', 'green']
+    edge_prefs = {
+        'popularity': 1,
+        'green': 5
+    }
+    noptions = 15
 
     conn = db_conn.connPool.getconn()
     router = OrienteeringRouter(conn)
     results = router.make_route(origins, dests, length_m, poi_prefs,
-                                edge_prefs, 7)
+                                edge_prefs, noptions)
 
     linestringlist = []
     for r in results:
