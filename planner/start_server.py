@@ -3,10 +3,12 @@ from concurrent import futures
 import time
 import json
 import grpc
+from typing import *
+
 
 import planner_pb2
 import planner_pb2_grpc
-from config import config
+from routers.base_router import RouteResult
 from routers.orienteering_router import OrienteeringRouter
 
 from db_conn import connPool
@@ -15,44 +17,64 @@ from routers.point2point_router import Point2PointRouter
 _ONE_DAY_IN_SECONDS = 60 * 60 * 24
 
 
+def routeresults_to_json(list: List[RouteResult]) -> str:
+    """
+    Convert a list of RouteResults to a JSON message ready to send out.
+    :param list:
+    :return:
+    """
+    routeobjs = []
+    for r in list:
+        routeobjs.append({
+            'json': json.loads(r.route),
+            'score': r.score,
+            'length': r.length
+        })
+    return json.dumps({
+        'routes': routeobjs
+    })
+
+
 class RoutePlanner(planner_pb2_grpc.RoutePlannerServicer):
 
     def PlanRoute(self, request, context):
-        data = {}
-        constraints = json.loads(request.jsonData)
+        req = json.loads(request.jsonData)
+        req = req['jsonData']
+        print('Received PlanRoute() call. Data:')
+        print(req)
 
-        print('Received PlanRoute() call. Constraints:')
-        print(constraints)
+        try:
+            # Convert origins and dests to lists of tuples
+            origins = [(o['latitude'], o['longitude'])
+                       for o in req['origins']]
+            dests = [(d['latitude'], d['longitude'])
+                     for d in req['dests']]
 
-        # Lat/lng of origin
-        origin = constraints.get('origin')
-        destination = constraints.get('destination')
-        desired_length = constraints.get('desiredLength')
-        if origin is not None and destination is not None:
-            orig_lat = float(origin.get('latitude'))
-            orig_lng = float(origin.get('longitude'))
-            dest_lat = float(destination.get('latitude'))
-            dest_lng = float(destination.get('longitude'))
+            # Neither can be empty
+            if origins == [] or dests == []:
+                raise ValueError('Origins or dests cannot be empty')
 
             with connPool.getconn() as conn:
-                # If exception is raised in this block, rollback transaction, else commit.
-                if desired_length:
-                    desired_length = float(desired_length)
-                    router = OrienteeringRouter(conn)
-                else:
+                if 'desired_dist' not in req:
                     router = Point2PointRouter(conn)
+                    routes = router.make_route(origins, dests)
 
-                linestring, length = router.make_route((orig_lat, orig_lng), (dest_lat, dest_lng), desired_length)
-                route_geometry = json.loads(linestring)
+                else:
+                    length = req['desired_dist']
+                    poi_prefs = req['poi_prefs']
+                    edge_prefs = req['edge_prefs']
+                    noptions = req['noptions']
+                    router = OrienteeringRouter(conn)
+                    routes = router.make_route(
+                        origins, dests, length, poi_prefs, edge_prefs, noptions)
 
             connPool.putconn(conn)
-            data['route'] = route_geometry
-            data['length'] = length
-            json_data = json.dumps(data, separators=(',', ':'))
-            return planner_pb2.JsonReply(jsonData=json_data)
-        else:
+
+            return planner_pb2.JsonReply(jsonData=routeresults_to_json(routes))
+
+        except ValueError as e:
             context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
-            context.set_details('Invalid origin or destination!')
+            context.set_details(e)
             return planner_pb2.JsonReply()
 
 
