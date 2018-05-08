@@ -7,21 +7,16 @@ import random
 from typing import *
 from googleplaces import GooglePlacesAttributeError
 import utils.poi_types as poi_types
+from routers.base_router import RouteResult
 
 from utils import google_utils as GoogleUtils
 
 
-__all__ = ['RouteResult', 'OrienteeringRouter']
+__all__ = ['OrienteeringRouter']
 
 
 class PathResult(NamedTuple):
     path: List[int]
-    score: float
-    length: float
-
-
-class RouteResult(NamedTuple):
-    route: str
     score: float
     length: float
 

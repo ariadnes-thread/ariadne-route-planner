@@ -1,8 +1,7 @@
-import abc
+from typing import NamedTuple
 
 
-class BaseRouter(abc.ABC):
-
-    @abc.abstractmethod
-    def make_route(self, origin, destination, *args, **kwargs):
-        raise NotImplementedError
+class RouteResult(NamedTuple):
+    route: str
+    score: float
+    length: float
