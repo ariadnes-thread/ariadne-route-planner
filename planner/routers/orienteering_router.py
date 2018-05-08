@@ -8,7 +8,6 @@ from typing import *
 from googleplaces import GooglePlacesAttributeError
 import utils.poi_types as poi_types
 
-from routers.base_router import BaseRouter
 from utils import google_utils as GoogleUtils
 
 
@@ -30,41 +29,45 @@ class RouteResult(NamedTuple):
 class GmapsResult(NamedTuple):
     name: str
     latlon: Tuple[float, float]
-    rating: float
+    score: float
 
 
-def get_pois_from_gmaps(location: Tuple[float, float],
-                        radius: float, type_list) -> List[GmapsResult]:
+def get_pois_from_gmaps(loc: Tuple[float, float], radius: float,
+                        poi_prefs: Dict[str, float]) -> List[GmapsResult]:
     """
     Get POIs from Google Maps.
 
     Get POIs from Google Maps Places API Nearby Search. It only uses a
     single API request, and only returns up to 20 places.
-    :param location: (lat, lon) pair.
+    :param loc: (lat, lon) pair.
     :param radius: Search radius in meters.
-    :param type_list: List of the type of POIS being fetched from gmaps
-        (parks, landmarks, coffee shops, etc.)
+    :param poi_prefs: Map of poi types to their relative weights.
     :return: List of results.
     """
-    GoogleHelper = GoogleUtils.GoogleHelper()
-    places = GoogleHelper.get_pois({'lat': location[0], 'lng': location[1]},
-                                   radius=radius, type_list=type_list)
     output = []
-    for place in places:
-        try:
-            # Note: some places don't seem to have ratings.
-            # These return a GooglePlacesAttributeError as caught below,
-            # and are skipped.
-            # Convert rating and latlon from Decimal to float.
-            output.append(GmapsResult(
-                name=place.name,
-                latlon=(float(place.geo_location['lat']),
-                        float(place.geo_location['lng'])),
-                rating=float(place.rating)
-            ))
-        except GooglePlacesAttributeError:
-            # Name, location, or rating wasn't available. Skip it
-            pass
+    GoogleHelper = GoogleUtils.GoogleHelper()
+
+    for poitype in poi_prefs:
+        # Places for this POI only
+        places = GoogleHelper.get_pois({'lat': loc[0], 'lng': loc[1]},
+                                       radius=radius, type_list=[poitype])
+        for place in places:
+            try:
+                # Note: some places don't seem to have ratings.
+                # These return a GooglePlacesAttributeError as caught below,
+                # and are skipped.
+
+                # Convert rating and latlon from Decimal to float.
+                # Score POIs by their weight.
+                output.append(GmapsResult(
+                    name=place.name,
+                    latlon=(float(place.geo_location['lat']),
+                            float(place.geo_location['lng'])),
+                    score=float(place.rating) * poi_prefs[poitype]
+                ))
+            except GooglePlacesAttributeError:
+                # Name, location, or rating wasn't available. Skip it
+                pass
 
     return output
 
@@ -320,14 +323,15 @@ class OrienteeringRouter:
 
     def make_route(self, origin_latlons: List[Tuple[float, float]],
                    dest_latlons: List[Tuple[float, float]], length_m: float,
-                   poi_types_list: List[str], edge_prefs: List[str],
+                   poi_prefs: Dict[str, float], edge_prefs: List[str],
                    noptions: int) -> List[RouteResult]:
         """
         Make routes of at most a given length while visitng points of interest.
         :param origin_latlons: Possible origins as lat/lon pairs.
         :param dest_latlons: Possible destinations as lat/lon pairs.
         :param length_m: Desired length in meters.
-        :param poi_types_list: List of poi types. A subset of what's in poi_types.py.
+        :param poi_prefs: Map of poi types to their relative weights. The keys
+            are a subset of what's in poi_types.py.
         :param edge_prefs: List of edge preferences. A subset of
             ['green', 'popularity'].
         :param noptions: Number of route suggestions to return.
@@ -347,7 +351,7 @@ class OrienteeringRouter:
         print('CENTER:', center)
 
         # Get points of interest
-        pois = get_pois_from_gmaps(center, length_m / 2, poi_types_list)
+        pois = get_pois_from_gmaps(center, length_m / 2, poi_prefs)
 
         # Map origins, dests, and POIs to actual vertices
         origins = [nearest_vertex(self.conn, o) for o in origin_latlons]
@@ -358,7 +362,7 @@ class OrienteeringRouter:
         }
         print('ORIGINS:', origins, '; DEST:', dests)
         pprint(poi_nodes)
-        ratings = {vid: poi_nodes[vid].rating for vid in poi_nodes}
+        poi_score = {vid: poi_nodes[vid].score for vid in poi_nodes}
 
         # Resolve edge preferences
         green_pref, popul_pref = {
@@ -379,7 +383,7 @@ class OrienteeringRouter:
         # Other checks for strongly connected components?
 
         # Get high-scoring paths from origins to dests
-        paths = solve_orienteering(ratings, length_m, pairdist,
+        paths = solve_orienteering(poi_score, length_m, pairdist,
                                    origins, dests, noptions)
         print('BEST PATHS:')
         pprint(paths)
@@ -406,12 +410,15 @@ def main():
              (34.147672, -118.144328),  # Pasadena city hall
              ]
     length_m = 4000  # Maximum length of path in meters
-    poi_types_list = [poi_types.TYPE_PARK, poi_types.TYPE_ART_GALLERY]
+    poi_prefs = {
+        poi_types.TYPE_PARK: 2,
+        poi_types.TYPE_ART_GALLERY: 5
+    }
     edge_prefs = ['popularity', 'green']
 
     conn = db_conn.connPool.getconn()
     router = OrienteeringRouter(conn)
-    results = router.make_route(origins, dests, length_m, poi_types_list,
+    results = router.make_route(origins, dests, length_m, poi_prefs,
                                 edge_prefs, 7)
 
     linestringlist = []
