@@ -50,7 +50,7 @@ class RoutePlanner(planner_pb2_grpc.RoutePlannerServicer):
                      for d in req['dests']]
 
             # Neither can be empty
-            if origins == [] or dests == []:
+            if not (origins and dests):
                 raise ValueError('Origins or dests cannot be empty')
 
             with connPool.getconn() as conn:
