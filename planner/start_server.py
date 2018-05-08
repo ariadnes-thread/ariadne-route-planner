@@ -37,9 +37,8 @@ def routeresults_to_json(list: List[RouteResult]) -> str:
 
 class RoutePlanner(planner_pb2_grpc.RoutePlannerServicer):
 
-    def PlanRoute(self, request, context):
-        req = json.loads(request.jsonData)
-        req = req['jsonData']
+    def PlanRoute(self, jsonrequest, context):
+        req = json.loads(jsonrequest.jsonData)
         print('Received PlanRoute() call. Data:')
         print(req)
 
