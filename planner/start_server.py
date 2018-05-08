@@ -38,7 +38,7 @@ class RoutePlanner(planner_pb2_grpc.RoutePlannerServicer):
                 # If exception is raised in this block, rollback transaction, else commit.
                 if desired_length:
                     desired_length = float(desired_length)
-                    router = OrienteeringRouter(conn, config['gmapsApiKey'])
+                    router = OrienteeringRouter(conn)
                 else:
                     router = Point2PointRouter(conn)
 

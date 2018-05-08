@@ -1,18 +1,36 @@
-from collections import namedtuple
-from config import config
+import heapq
+import itertools
+import json
 from pprint import pprint
+import statistics
 import random
 from typing import *
 from googleplaces import GooglePlacesAttributeError
 import utils.poi_types as poi_types
 
-import googlemaps
-import geopy.distance
-
 from routers.base_router import BaseRouter
 from utils import google_utils as GoogleUtils
 
-GmapsResult = namedtuple('GmapsResult', ['name', 'latlon', 'rating'])
+
+__all__ = ['RouteResult', 'OrienteeringRouter']
+
+
+class PathResult(NamedTuple):
+    path: List[int]
+    score: float
+    length: float
+
+
+class RouteResult(NamedTuple):
+    route: str
+    score: float
+    length: float
+
+
+class GmapsResult(NamedTuple):
+    name: str
+    latlon: Tuple[float, float]
+    rating: float
 
 
 def get_pois_from_gmaps(location: Tuple[float, float],
@@ -68,219 +86,310 @@ def nearest_vertex(conn, latlon: Tuple[float, float]) -> int:
         return result[0]
 
 
-def all_pairs_shortest_path_costs(conn, vids: List[int]) \
-        -> Dict[Tuple[int, int], float]:
+def make_edges_sql(conn, green_pref: float, popul_pref: float,
+                   max_discount: float = 0.7) -> str:
     """
-    Compute distance between each pair of vertices.
-    :param vids: List of vertex ids.
-    :return: Map of (vertex pair) -> distance.
+    Make edges_sql query with adjusted edge costs. It's suitable for
+    use in pgr_dijkstra calls.
+    :param conn:
+    :param green_pref: Strength of greenery preference, in [0, 1].
+    :param popul_pref: Strength of popularity preference, in [0, 1].
+        green_pref and popul_pref must sum to no more than 1.
+    :param max_discount: Maximum fraction that an edge's cost can be
+        discounted.
+    :return: edges_sql string.
+    """
+    assert 0 <= green_pref + popul_pref <= 1
+
+    with conn.cursor() as cur:
+        return cur.mogrify(
+            '''
+            SELECT
+              gid AS id, source, target,
+              length_m * multiplier AS cost,
+              length_m * SIGN(reverse_cost) * multiplier AS reverse_cost
+            FROM ways
+              INNER JOIN (
+                SELECT
+                  gid, 
+                  (1 - %s * (%s * greenery - %s * popularity_highres)) 
+                    AS multiplier
+                FROM ways_metadata                  
+              ) AS ways_multipliers USING (gid)
+            ''',
+            (max_discount, green_pref, popul_pref)
+        ).decode()
+
+
+def pairwise_shortest_path_costs(conn, edges_sql: str, origins: List[int],
+         dests: List[int]) -> Dict[Tuple[int, int], float]:
+    """
+    Compute distance between each pair of origins and destinations.
+    :param conn:
+    :param edges_sql: Edges query for pgr_dijkstra.
+    :param origins: List of starting vertices.
+    :param dests: List of destination vertices.
+    :return: Map of (vertex pair) -> distance, in meters.
+        Although edges_sql may use adjusted edge costs, this method returns
+        the true distances of the paths.
+        If no path exists, entries may be missing.
     """
     with conn.cursor() as cur:
-        # Execute many-to-many Dijkstra's. Give edge costs in meters
-        cur.execute('''
-        SELECT *
-        FROM pgr_dijkstraCost(
-            'SELECT gid AS id, source, target, length_m AS cost, ' ||
-             'length_m * SIGN(reverse_cost) AS reverse_cost FROM ways',
-            %s, %s)
-        ''', (vids, vids))
+        # Execute many-to-many Dijkstra's.
+        # Rejoin with 'ways' to get true lengths.
+        cur.execute(
+            '''
+            WITH dijkstra AS (
+                SELECT * FROM pgr_dijkstra(%s, %s, %s)
+            )
+            SELECT start_vid, end_vid, SUM(length_m)
+            FROM dijkstra
+              INNER JOIN ways ON (dijkstra.edge = ways.gid)
+            GROUP BY start_vid, end_vid
+            ''',
+            (edges_sql, origins, dests))
         results = cur.fetchall()
         return {(start_vid, end_vid): length
                 for (start_vid, end_vid, length) in results}
 
 
-def solve_orienteering(node_score: Dict[int, float],
-                       max_distance: float,
-                       pairdist: Dict[Tuple[int, int], float],
-                       origin_vid: int, dest_vid: int,
-                       power_param: float = 4.0, length_param: int = 4,
-                       ntrials: int = 1000) -> List[int]:
+def solve_orienteering(
+        poi_score: Dict[int, float], max_distance: float,
+        pairdist: Dict[Tuple[int, int], float],
+        origins: List[int], dests: List[int], noptions: int,
+        power_param: float = 4.0, length_param: int = 4,
+        n_total_trials: int = 1000) -> List[PathResult]:
     """
-    Solve the orienteering problem for a set of nodes.
-
-    There are two kinds of nodes: "points of interest", and the origin and
-    destination. Scores are only for points of interest, but distances
-    must be for *all* pairs of vertices.
-    :param node_score: Weights of all POIs.
+    Return high-scoring paths from any origin to any destination.
+    Paths accumulate score by visiting POIs.
+    :param poi_score: Score of each POI.
     :param max_distance: Desired maximum distance.
-    :param pairdist: Map of distances between each pair of nodes, including
-        origin, destination, and POIs.
-    :param origin_vid: Origin id.
-    :param dest_vid: Destination id.
+    :param pairdist: Map of distances between each pair of nodes.
+        Specifically, all pairs in
+        '(o, d) for o in origins + pois for d in pois + dests'
+        should be represented. However, missing pairs are allowed; they are
+        assumed not to exist.
+    :param origins: List of possible origins.
+    :param dests: List of possible destinations.
+    :param noptions: Return up to this many options. There are a variety
+        of reasons this method may return fewer than 'noptions' paths;
+        see the comment for make_paths().
     Orienteering algorithm parameters:
     :param power_param: Configures how desirability is calculated.
     :param length_param: Configures how many of the top nodes to keep.
-    :param ntrials: Number of random walks to try.
-    :return: List of nodes along the best path, including the origin and
-    destination.
-    If something crazy happens like the distance from the origin to the
-    destination is > max_distance, still return [origin_vid, dest_vid].
+    :param n_total_trials: Number of total random paths to try.
+    :return: List of (path, score, length), for each best path.
     """
+    def make_path(origin: int, dest: int) -> PathResult:
+        """
+        Make a path from a specific origin to a specific destination.
 
-    def make_path() -> Optional[Tuple[List[int], float, float]]:
+        *Assumes* that (origin, dest) in pairdist, that is, origin can
+        reach dest.
+        :param origin: Origin vertex id.
+        :param dest: Destination vertex id.
+        :return: (List of nodes, score, distance) of a randomly generated
+            path. The list of nodes includes origin and dest.
         """
-        Make a path from origin to destination.
-        This function may fail and return None. Currently the only reason
-        it could fail is if (origin_vid, dest_vid) not in pairdist,
-        i.e. the origin cannot reach the destination.
-        :return: (List of nodes, score, distance).
-            The list of nodes includes the origin and destination.
-            If something fails, return None.
-        """
-        path = [origin_vid]
-        score = 0
-        dist = 0
+        assert (origin, dest) in pairdist
+        path = [origin]
+        score = 0.0
+        dist = 0.0
         visited = set()
 
         # Make a path
         while True:
             # Get feasible nodes, and compute their desirability
             cur = path[-1]
-            feasible_nodes = []
-            for v in set(node_score) - visited:
+            feas = []
+            for v in set(poi_score) - visited:
                 try:
-                    if dist + pairdist[(cur, v)] + pairdist[(v, dest_vid)] \
+                    if dist + pairdist[(cur, v)] + pairdist[(v, dest)] \
                             < max_distance:
-                        d = (node_score[v] / pairdist[(cur, v)]) ** power_param
-                        feasible_nodes.append((d, v))
+                        d = (poi_score[v] / pairdist[(cur, v)]) ** power_param
+                        feas.append((d, v))
                 except KeyError:
                     # cur cannot reach v, or v cannot reach dest, so no
                     # pairdist
                     pass
 
             # If no POIs are feasible, go directly to destination
-            if not feasible_nodes:
-                path.append(dest_vid)
-                try:
-                    dist += pairdist[(cur, dest_vid)]
-                    return path, score, dist
-                except KeyError:
-                    # cur cannot reach dest.
-                    # But we reason backward: how did we get to cur? From
-                    # another node prev. But prev wouldn't have chosen cur
-                    # if cur couldn't reach dest.
-                    # So cur must be the origin, and the origin cannot
-                    # reach dest.
-                    return None
+            if feas == []:
+                path.append(dest)
+                # There are two cases here.
+                # If cur is origin, origin can reach dest by this function's
+                # precondition.
+                # Otherwise, we reason backward. We got to cur from some
+                # previous node, and we wouldn't have walked to cur if
+                # it can't reach dest.
+                # So there is no KeyError here.
+                dist += pairdist[(cur, dest)]
+                return PathResult(path, score, dist)
 
             # Choose next node
-            feasible_nodes.sort(reverse=True)  # Sort highest -> lowest desirability
-            feasible_nodes = feasible_nodes[:length_param]
-            feas_d, feas_v = zip(*feasible_nodes)
+            feas.sort(reverse=True)  # Sort highest -> lowest desirability
+            feas = feas[:length_param]
+            feas_d, feas_v = zip(*feas)
             nextnode = random.choices(feas_v, feas_d)[0]
 
             # Advance to next node
             path.append(nextnode)
-            score += node_score[nextnode]
+            score += poi_score[nextnode]
             dist += pairdist[(cur, nextnode)]
             visited.add(nextnode)
 
-    # TODO what if max_distance < shortest distance from origin to dest?
-    bestpath = [origin_vid, dest_vid]
-    bestscore = 0
-    bestdist = 0
+    def make_paths(origin: int, dest: int, ntrials: int
+                   ) -> Iterator[PathResult]:
+        """
+        Make paths from origin to destination. Return unique paths found.
 
-    for trial in range(ntrials):
-        res = make_path()
-        if res is None:
-            continue
-        mypath, myscore, mydist = res
+        There are several cases where the function may return zero, only
+        one, or very few paths.
+        - If origin cannot reach dest, return empty list.
+        - If distance from origin to dest > max distance, technically no
+          path is valid but we assume the user wanted a short path
+          as possible, so return the path directly from origin to dest.
+        - Otherwise, return up to the # distinct paths found.
+        :param origin: Start of path.
+        :param dest: Destination of path.
+        :param ntrials: Number of trials to execute.
+        :return: Iterator of (path, score, length).
+        """
+        if (origin, dest) not in pairdist:
+            # Origin and dest are not connected. Yield no routes
+            return
 
-        # Better score, or same score but shorter path
-        if myscore > bestscore or \
-                (myscore == bestscore and mydist < bestdist):
-            bestpath = mypath
-            bestscore = myscore
-            bestdist = mydist
-            print('Best path: {}, score={}, dist={}, trial={}'.format(
-                bestpath, bestscore, bestdist, trial))
+        if pairdist[origin, dest] > max_distance:
+            # Yield only direct origin -> dest path
+            yield PathResult([origin, dest], 0, pairdist[origin, dest])
+            return
 
-    return bestpath
+        # Return unique paths
+        pathset = set()
+        for _ in range(ntrials):
+            path, score, length = make_path(origin, dest)
+            t = tuple(path)
+            if t not in pathset:
+                yield PathResult(path, score, length)
+                pathset.add(t)
+
+    def make_all_paths() -> Iterator[PathResult]:
+        for o, d in itertools.product(origins, dests):
+            yield from make_paths(
+                o, d, n_total_trials // (len(origins) * len(dests))
+            )
+
+    return heapq.nlargest(noptions, make_all_paths(), key=lambda x: x[1])
 
 
-def get_route_geojson(conn, nodes: List[int]) -> Tuple[str, float]:
+def get_route_geojson(conn, edges_sql: str, nodes: List[int]) -> str:
     """
     Find route through all vertices and return its GeoJSON.
+    :param edges_sql: Edges query for pgr_dijkstra.
     :param nodes: List of vertices.
-    :return: (GeoJSON of path, total length of path in meters)
+    :return: GeoJSON of path, as a LineString.
     """
     with conn.cursor() as cur:
         cur.execute('''
         WITH dijkstra AS (
-            SELECT *
-            FROM pgr_dijkstraVia(
-                'SELECT gid AS id, source, target, cost, reverse_cost FROM ways',
-                %s)
+            SELECT * FROM pgr_dijkstraVia(%s, %s)
         )
         SELECT
-            ST_AsGeoJSON(ST_MakeLine(CASE WHEN node = source THEN the_geom ELSE ST_Reverse(the_geom) END)) AS geojson, 
-            SUM(ways.length_m) AS length
+          ST_AsGeoJSON(ST_MakeLine(
+            CASE WHEN node = source THEN the_geom ELSE ST_Reverse(the_geom) END
+          )) AS geojson
         FROM dijkstra
           JOIN ways ON dijkstra.edge = ways.gid;
-        ''', (nodes,))
-        return cur.fetchone()
+        ''', (edges_sql, nodes,))
+
+        return cur.fetchone()[0]
 
 
-class OrienteeringRouter(BaseRouter):
+class OrienteeringRouter:
     """
     Router that makes routes by visiting nice vertices.
     Basically make_route is the only function meant to be used from outside.
     """
 
-    def __init__(self, conn, gmaps_api_key: str):
+    def __init__(self, conn):
         """
         Create an orienteering router.
-        :param gmaps_api_key: Google Maps API key.
         :param conn: psycopg2 database connection.
         """
-        self.gmapsclient = googlemaps.Client(gmaps_api_key)
         self.conn = conn
 
-    def make_route(self, origin, dest, length_m, *args, **kwargs):
+    def make_route(self, origin_latlons: List[Tuple[float, float]],
+                   dest_latlons: List[Tuple[float, float]], length_m: float,
+                   poi_types_list: List[str], edge_prefs: List[str],
+                   noptions: int) -> List[RouteResult]:
         """
-        Make a route of at most a given length using orienteering heuristics.
-        :param origin: lat/lon pair.
-        :param dest: lat/lon pair.
+        Make routes of at most a given length while visitng points of interest.
+        :param origin_latlons: Possible origins as lat/lon pairs.
+        :param dest_latlons: Possible destinations as lat/lon pairs.
         :param length_m: Desired length in meters.
-        :return: (GeoJSON of route, total length of route in meters)
+        :param poi_types_list: List of poi types. A subset of what's in poi_types.py.
+        :param edge_prefs: List of edge preferences. A subset of
+            ['green', 'popularity'].
+        :param noptions: Number of route suggestions to return.
+        :return: List of routes. Each route is a RouteResult, containing
+            (GeoJSON, score, total length in meters).
+            Score is meant for comparing routes, but doesn't necessarily have
+            meaning alone.
         """
-        # Get points of interest
-        center = midpoint(origin, dest)
+        # Compute median point
+        # TODO this isn't the center of the smallest circle that covers all the
+        # origins/dests...but solving that (the smallest-circle problem) is
+        # complicated.
+        lats, lons = zip(*(origin_latlons + dest_latlons))
+        medlat = statistics.median(lats)
+        medlon = statistics.median(lons)
+        center = (medlat, medlon)
         print('CENTER:', center)
-        pois = get_pois_from_gmaps(center, length_m / 2,
-                                   [poi_types.TYPE_PARK, poi_types.TYPE_RESTAURANT])
 
-        # Filter POIs that are too far away
-        pois = [
-            poi for poi in pois
-            if geopy.distance.geodesic(origin, poi.latlon).meters +
-               geopy.distance.geodesic(poi.latlon, dest).meters <= length_m
-        ]
+        # Get points of interest
+        pois = get_pois_from_gmaps(center, length_m / 2, poi_types_list)
 
-        # Map origin, dest, and POIs to actual vertices
-        origin_vid = nearest_vertex(self.conn, origin)
-        dest_vid = nearest_vertex(self.conn, dest)
+        # Map origins, dests, and POIs to actual vertices
+        origins = [nearest_vertex(self.conn, o) for o in origin_latlons]
+        dests = [nearest_vertex(self.conn, d) for d in dest_latlons]
         poi_nodes = {
             nearest_vertex(self.conn, poi.latlon): poi
             for poi in pois
         }
-        print('ORIGIN:', origin_vid, '; DEST:', dest_vid)
+        print('ORIGINS:', origins, '; DEST:', dests)
         pprint(poi_nodes)
         ratings = {vid: poi_nodes[vid].rating for vid in poi_nodes}
 
-        # Solve APSP between origin, dest, and POIs
-        all_vids = [origin_vid, dest_vid] + list(poi_nodes.keys())
-        pairdist = all_pairs_shortest_path_costs(self.conn, all_vids)
+        # Resolve edge preferences
+        green_pref, popul_pref = {
+            (True, True): (0.5, 0.5),
+            (True, False): (1, 0),
+            (False, True): (0, 1),
+            (False, False): (0, 0)
+        }[('green' in edge_prefs, 'popularity' in edge_prefs)]
+        # Compute edges_sql
+        edges_sql = make_edges_sql(self.conn, green_pref, popul_pref)
+
+        # Compute pairwise distances between origins, dests, and POIs
+        pairdist = pairwise_shortest_path_costs(
+            self.conn, edges_sql, origins + list(poi_nodes.keys()),
+            list(poi_nodes.keys()) + dests)
         # TODO if a node is not connected, pairdist may silently omit distances
         # Sanity check that dest is actually reachable from origin?
         # Other checks for strongly connected components?
 
-        # Solve orienteering problem from origin to dest
-        bestpath = solve_orienteering(ratings, length_m, pairdist,
-                                      origin_vid, dest_vid)
+        # Get high-scoring paths from origins to dests
+        paths = solve_orienteering(ratings, length_m, pairdist,
+                                   origins, dests, noptions)
+        print('BEST PATHS:')
+        pprint(paths)
 
-        # Compute the overall route from origin to dest
-        return get_route_geojson(self.conn, bestpath)
+        # Get GeoJSON of each path
+        return [
+            RouteResult(get_route_geojson(self.conn, edges_sql, p.path),
+                        p.score, p.length)
+            for p in paths
+        ]
 
 
 def midpoint(coord1, coord2):
@@ -289,13 +398,28 @@ def midpoint(coord1, coord2):
 
 
 def main():
-    origin = (34.140003, -118.122775)  # Caltech
-    dest = (34.140707, -118.132212)  # Lake Ave
-    length_m = 6000  # Maximum length of path in meters
+    origins = [(34.140003, -118.122775),  # Avery
+               (34.136872, -118.122910),  # Olive walk
+               (34.137038, -118.127548),  # Kerchoff?
+               ]
+    dests = [(34.143209, -118.118393),  # PCC
+             (34.147672, -118.144328),  # Pasadena city hall
+             ]
+    length_m = 4000  # Maximum length of path in meters
+    poi_types_list = [poi_types.TYPE_PARK, poi_types.TYPE_ART_GALLERY]
+    edge_prefs = ['popularity', 'green']
 
     conn = db_conn.connPool.getconn()
-    router = OrienteeringRouter(config['gmapsApiKey'], conn)
-    pprint(router.make_route(origin, dest, length_m))
+    router = OrienteeringRouter(conn)
+    results = router.make_route(origins, dests, length_m, poi_types_list,
+                                edge_prefs, 7)
+
+    linestringlist = []
+    for r in results:
+        linestringlist.append(json.loads(r.route))
+    print(json.dumps(
+        {'type': 'GeometryCollection', 'geometries': linestringlist}
+    ))
 
 
 if __name__ == '__main__':
