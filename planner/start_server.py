@@ -3,12 +3,10 @@ from concurrent import futures
 import time
 import json
 import grpc
-from typing import *
 
 
 import planner_pb2
 import planner_pb2_grpc
-from routers.base_router import RouteResult
 from routers.orienteering_router import OrienteeringRouter
 
 from db_conn import connPool
@@ -16,13 +14,14 @@ from routers.point2point_router import Point2PointRouter
 
 _ONE_DAY_IN_SECONDS = 60 * 60 * 24
 
+logger = logging.getLogger(__name__)
+
 
 class RoutePlanner(planner_pb2_grpc.RoutePlannerServicer):
 
     def PlanRoute(self, jsonrequest, context):
         req = json.loads(jsonrequest.jsonData)
-        print('Received PlanRoute() call. Data:')
-        print(req)
+        logger.info('Received PlanRoute() call. Data: %s', req)
 
         try:
             # Convert origins and dests to lists of tuples
@@ -77,6 +76,7 @@ def serve():
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
     planner_pb2_grpc.add_RoutePlannerServicer_to_server(RoutePlanner(), server)
     server.add_insecure_port('[::]:1235')
+    logger.info('Starting server')
     server.start()
     try:
         while True:
@@ -86,5 +86,7 @@ def serve():
 
 
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s:%(name)s:%(levelname)s:%(message)s')
     serve()

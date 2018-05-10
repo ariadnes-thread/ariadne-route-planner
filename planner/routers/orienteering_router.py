@@ -1,7 +1,7 @@
 import heapq
 import itertools
 import json
-from pprint import pprint
+import logging
 import statistics
 import random
 from typing import *
@@ -13,6 +13,8 @@ from utils import google_utils as GoogleUtils
 
 
 __all__ = ['OrienteeringRouter']
+
+logger = logging.getLogger(__name__)
 
 
 class PathResult(NamedTuple):
@@ -353,7 +355,7 @@ class OrienteeringRouter:
         medlat = statistics.median(lats)
         medlon = statistics.median(lons)
         center = (medlat, medlon)
-        print('CENTER:', center)
+        logger.info('CENTER: %s', center)
 
         # Get points of interest
         pois = get_pois_from_gmaps(center, length_m / 2, poi_prefs)
@@ -365,8 +367,8 @@ class OrienteeringRouter:
             nearest_vertex(self.conn, poi.latlon): poi
             for poi in pois
         }
-        print('ORIGINS:', origins, '; DEST:', dests)
-        pprint(poi_nodes)
+        logger.info('ORIGINS: %s, DEST: %s', origins, dests)
+        logger.info('POIs: %s', poi_nodes)
         poi_score = {vid: poi_nodes[vid].score for vid in poi_nodes}
 
         # Compute edges_sql based on edge preferences
@@ -383,8 +385,7 @@ class OrienteeringRouter:
         # Get high-scoring paths from origins to dests
         paths = solve_orienteering(poi_score, length_m, pairdist,
                                    origins, dests, noptions)
-        print('BEST PATHS:')
-        pprint(paths)
+        logger.info('BEST PATHS: %s', paths)
 
         # Get GeoJSON of each path
         return [
