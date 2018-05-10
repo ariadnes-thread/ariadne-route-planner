@@ -17,24 +17,6 @@ from routers.point2point_router import Point2PointRouter
 _ONE_DAY_IN_SECONDS = 60 * 60 * 24
 
 
-def routeresults_to_json(list: List[RouteResult]) -> str:
-    """
-    Convert a list of RouteResults to a JSON message ready to send out.
-    :param list:
-    :return:
-    """
-    routeobjs = []
-    for r in list:
-        routeobjs.append({
-            'json': json.loads(r.route),
-            'score': r.score,
-            'length': r.length
-        })
-    return json.dumps({
-        'routes': routeobjs
-    })
-
-
 class RoutePlanner(planner_pb2_grpc.RoutePlannerServicer):
 
     def PlanRoute(self, jsonrequest, context):
@@ -69,7 +51,21 @@ class RoutePlanner(planner_pb2_grpc.RoutePlannerServicer):
 
             connPool.putconn(conn)
 
-            return planner_pb2.JsonReply(jsonData=routeresults_to_json(routes))
+            # Convert RouteResults into objects that can be serialized by
+            # json.dumps. NamedTuples are serialized as tuples, which is not
+            # what we want.
+            routeobjs = [
+                {
+                    'json': json.loads(r.route),
+                    'score': r.score,
+                    'length': r.length
+                } for r in routes]
+            jsonreply_obj = {'routes': routeobjs}
+
+            # In the JsonReply object, the value of jsonData is the *string*
+            # of the JSON object
+            return planner_pb2.JsonReply(
+                jsonData=json.dumps(jsonreply_obj))
 
         except ValueError as e:
             context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
