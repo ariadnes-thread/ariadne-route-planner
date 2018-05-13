@@ -7,9 +7,10 @@ import grpc
 
 import planner_pb2
 import planner_pb2_grpc
-from routers.orienteering_router import OrienteeringRouter
 
 from db_conn import connPool
+from routers.base_router import RouteEncoder
+from routers.orienteering_router import OrienteeringRouter
 from routers.point2point_router import Point2PointRouter
 
 _ONE_DAY_IN_SECONDS = 60 * 60 * 24
@@ -48,21 +49,21 @@ class RoutePlanner(planner_pb2_grpc.RoutePlannerServicer):
 
             connPool.putconn(conn)
 
-            # Convert RouteResults into objects that can be serialized by
-            # json.dumps. NamedTuples are serialized as tuples, which is not
-            # what we want.
-            routeobjs = [
-                {
-                    'json': json.loads(r.route),
-                    'score': r.score,
-                    'length': r.length
-                } for r in routes]
-            jsonreply_obj = {'routes': routeobjs}
+            # # Convert RouteResults into objects that can be serialized by
+            # # json.dumps. NamedTuples are serialized as tuples, which is not
+            # # what we want.
+            # routeobjs = [
+            #     {
+            #         'json': json.loads(r.route),
+            #         'score': r.score,
+            #         'length': r.length
+            #     } for r in routes]
+            # jsonreply_obj = {'routes': routeobjs}
 
-            # In the JsonReply object, the value of jsonData is the *string*
-            # of the JSON object
-            return planner_pb2.JsonReply(
-                jsonData=json.dumps(jsonreply_obj))
+            # jsonData is not the JS object, but its string
+            jsonData = RouteEncoder().encode({'routes': routes})
+
+            return planner_pb2.JsonReply(jsonData=jsonData)
 
         except ValueError as e:
             context.set_code(grpc.StatusCode.INVALID_ARGUMENT)

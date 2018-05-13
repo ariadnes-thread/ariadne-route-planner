@@ -1,6 +1,5 @@
 import heapq
 import itertools
-import json
 import logging
 import statistics
 import random
@@ -393,8 +392,13 @@ class OrienteeringRouter(BaseRouter):
 
         # Get GeoJSON of each path
         return [
-            RouteResult(get_route_geojson(self.conn, edges_sql, p.path),
-                        p.score, p.length)
+            RouteResult(
+                get_route_geojson(self.conn, edges_sql, p.path),
+                p.score, p.length,
+                # Hack: this is simple but kludgy
+                origins.index(p.path[0]),
+                dests.index(p.path[-1])
+            )
             for p in paths
         ]
 
@@ -425,16 +429,19 @@ def main():
 
     conn = db_conn.connPool.getconn()
     router = OrienteeringRouter(conn)
-    results = router.make_route(
+    routes = router.make_route(
         origins, dests, noptions, desired_dist=length_m, poi_prefs=poi_prefs,
         edge_prefs=edge_prefs)
 
-    linestringlist = []
-    for r in results:
-        linestringlist.append(json.loads(r.route))
-    print(json.dumps(
-        {'type': 'GeometryCollection', 'geometries': linestringlist}
-    ))
+    # linestringlist = []
+    # for r in results:
+    #     linestringlist.append(json.loads(r.route))
+    # print(json.dumps(
+    #     {'type': 'GeometryCollection', 'geometries': linestringlist}
+    # ))
+
+    for route in routes:
+        print(route)
 
 
 if __name__ == '__main__':

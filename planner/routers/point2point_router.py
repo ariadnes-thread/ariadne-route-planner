@@ -1,6 +1,5 @@
 import itertools
 from pprint import pprint
-from typing import *
 
 from routers.base_router import BaseRouter, RouteResult
 
@@ -17,17 +16,22 @@ class Point2PointRouter(BaseRouter):
         """
         output = []
         with self.conn.cursor() as cur:
-            # We return max(noptions, norigins * ndests) routes.
-            for origin, dest in itertools.islice(
-                    itertools.product(origins, dests), noptions):
+            # First 'noptions' routes in norigins * ndests.
+            origin_dest_options = itertools.islice(
+                itertools.product(enumerate(origins), enumerate(dests)),
+                noptions)
+
+            for (oi, origin), (di, dest) in origin_dest_options:
                 cur.execute(
                     'SELECT * FROM pathFromNearestKnownPoints(%s,%s,%s,%s)',
-                    (*origin[::-1], *dest[::-1]))
+                    (*reversed(origin), *reversed(dest)))
                 linestring, length = cur.fetchone()
                 output.append(RouteResult(
-                    route=linestring,
+                    json=linestring,
                     score=0,
-                    length=length
+                    length=length,
+                    origin_idx=oi,
+                    dest_idx=di
                 ))
         return output
 
@@ -41,8 +45,10 @@ def main():
              (34.147672, -118.144328),  # Pasadena city hall
              ]
     router = Point2PointRouter(db_conn.connPool.getconn())
-    pprint(router.make_route(origins, dests, 4))
-
+    # pprint(router.make_route(origins, dests, 4))
+    routes = router.make_route(origins, dests, 4)
+    for route in routes:
+        print(route)
 
 if __name__ == '__main__':
     import db_conn
