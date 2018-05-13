@@ -24,29 +24,27 @@ class RoutePlanner(planner_pb2_grpc.RoutePlannerServicer):
         logger.info('Received PlanRoute() call. Data: %s', req)
 
         try:
+            # Parse required params
             # Convert origins and dests to lists of tuples
             origins = [(o['latitude'], o['longitude'])
-                       for o in req['origins']]
+                       for o in req.pop('origins')]
             dests = [(d['latitude'], d['longitude'])
-                     for d in req['dests']]
+                     for d in req.pop('dests')]
+            noptions = req.pop('noptions')
 
-            # Neither can be empty
+            # Neither origins nor dests can be empty
             if not (origins and dests):
                 raise ValueError('Origins or dests cannot be empty')
 
+            # Make routes
             with connPool.getconn() as conn:
                 if 'desired_dist' not in req:
                     router = Point2PointRouter(conn)
-                    routes = router.make_route(origins, dests)
 
                 else:
-                    length = req['desired_dist']
-                    poi_prefs = req['poi_prefs']
-                    edge_prefs = req['edge_prefs']
-                    noptions = req['noptions']
                     router = OrienteeringRouter(conn)
-                    routes = router.make_route(
-                        origins, dests, length, poi_prefs, edge_prefs, noptions)
+
+                routes = router.make_route(origins, dests, noptions, **req)
 
             connPool.putconn(conn)
 

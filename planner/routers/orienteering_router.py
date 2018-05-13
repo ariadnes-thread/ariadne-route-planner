@@ -7,7 +7,7 @@ import random
 from typing import *
 from googleplaces import GooglePlacesAttributeError
 import utils.poi_types as poi_types
-from routers.base_router import RouteResult
+from routers.base_router import BaseRouter, RouteResult
 
 from utils import google_utils as GoogleUtils
 
@@ -315,7 +315,7 @@ def get_route_geojson(conn, edges_sql: str, nodes: List[int]) -> str:
         return cur.fetchone()[0]
 
 
-class OrienteeringRouter:
+class OrienteeringRouter(BaseRouter):
     """
     Router that makes routes by visiting nice vertices.
     Basically make_route is the only function meant to be used from outside.
@@ -329,24 +329,28 @@ class OrienteeringRouter:
         self.conn = conn
 
     def make_route(self, origin_latlons: List[Tuple[float, float]],
-                   dest_latlons: List[Tuple[float, float]], length_m: float,
-                   poi_prefs: Dict[str, float], edge_prefs: Dict[str, float],
-                   noptions: int) -> List[RouteResult]:
+                   dest_latlons: List[Tuple[float, float]], noptions: int,
+                   **kwargs) -> List[RouteResult]:
         """
         Make routes of at most a given length while visitng points of interest.
-        :param origin_latlons: Possible origins as lat/lon pairs.
-        :param dest_latlons: Possible destinations as lat/lon pairs.
-        :param length_m: Desired length in meters.
-        :param poi_prefs: Map of poi types to their relative weights. The keys
-            are a subset of what's in poi_types.py.
-        :param edge_prefs: Map of edge types to their weights. The keys are a
-            subset of ['green', 'popularity'].
-        :param noptions: Number of route suggestions to return.
+
+        Expected keyword arguments:
+        - desired_dist: float - Desired distance in meters.
+        - poi_prefs: Dict[str, float] - Map of poi types to their relative
+          weights. The keys are a subset of what's in poi_types.py.
+        - edge_prefs: Dict[str, float] - Map of edge types to their weights.
+          The keys are a subset of ['green', 'popularity'].
+
         :return: List of routes. Each route is a RouteResult, containing
             (GeoJSON, score, total length in meters).
             Score is meant for comparing routes, but doesn't necessarily have
             meaning alone.
         """
+        # Parse kwargs
+        length_m = kwargs.pop('desired_dist')
+        poi_prefs = kwargs.pop('poi_prefs')
+        edge_prefs = kwargs.pop('edge_prefs')
+
         # Compute median point
         # TODO this isn't the center of the smallest circle that covers all the
         # origins/dests...but solving that (the smallest-circle problem) is
@@ -417,12 +421,13 @@ def main():
         'popularity': 1,
         'green': 5
     }
-    noptions = 15
+    noptions = 5
 
     conn = db_conn.connPool.getconn()
     router = OrienteeringRouter(conn)
-    results = router.make_route(origins, dests, length_m, poi_prefs,
-                                edge_prefs, noptions)
+    results = router.make_route(
+        origins, dests, noptions, desired_dist=length_m, poi_prefs=poi_prefs,
+        edge_prefs=edge_prefs)
 
     linestringlist = []
     for r in results:
