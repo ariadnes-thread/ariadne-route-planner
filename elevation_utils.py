@@ -1,4 +1,9 @@
 from http import client
+import math
+
+metersPerFoot = 0.3048
+radiansPerDegree = math.pi / 180
+earthRadius = 6371000
 
 # This function will get the elevation at any point in the US (though not all of Alaska)
 def getElevation(latitude, longitude): 
@@ -15,4 +20,50 @@ def USGS10mElev(lat,lon):
         return float(xml[xml.find(b'<Elevation>')+11:xml.find(b'</Elevation>')-1])
     else: return xml
 
-   
+# Calculate the elevation change between two latitude / longitude coordinates
+def elevationChange(startLat, startLon, endLat, endLon):
+	return getElevation(endLat, endLon) - getElevation(startLat, startLon)
+
+# Calculate the distance in feet between two latitude / longitude coordinates
+# uses the haversine formula as discussed here: https://www.movable-type.co.uk/scripts/latlong.html
+def distanceBetween(startLat, startLon, endLat, endLon):
+	radStartLat = degreesToRadians(startLat)
+	radStartLon = degreesToRadians(startLon)
+	radEndLat = degreesToRadians(endLat)
+	radEndLon = degreesToRadians(endLon)
+	a = math.pow(math.sin((radEndLat - radStartLat) / 2), 2) + math.cos(radStartLat) * math.cos(radEndLat) * math.pow(math.sin((radEndLon - radStartLon) / 2) , 2)
+	c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+	distance = earthRadius * c
+	return metersToFeet(distance)
+# note: I tested this for small distances around Caltech.  For the same coordinates, google says 499 feet,
+# and our calculation gives 508 feet, so it's a very small difference
+
+# Calculate the slope (elevation change / distance) between two latitude / longitude coordinates
+# This assumes a simple line between the two points
+def slopeBetweenSimple(startLat, startLon, endLat, endLon):
+	return elevationChange(startLat, startLon, endLat, endLon) / distanceBetween(startLat, startLon, endLat, endLon)
+
+# TODO: sample the elevations between two coordinates, and return as an array (for use in a visual of the elevation changes along the route)
+
+# Conversion utility functions:
+def feetToMeters(feet):
+	return feet * metersPerFoot;
+
+def metersToFeet(meters):
+	return meters / metersPerFoot;
+
+def degreesToRadians(degrees):
+	return degrees * radiansPerDegree
+
+def radiansToDegrees(degrees):
+	return degrees / radiansPerDegree
+
+# # Test of functionality, in the area around Caltech
+# print(getElevation(34.1377, -118.1253)) # should be about 765
+# print(degreesToRadians(180)) # should be pi
+# print(feetToMeters(1)) # should be 0.3048
+# print(distanceBetween(34.141365, -118.122908, 34.140965, -118.124518)) # should be about 500ft
+# print(elevationChange(34.141365, -118.122908, 34.140965, -118.124518)) # should be about 1ft
+# print(slopeBetweenSimple(34.141365, -118.122908, 34.140965, -118.124518)) # should be about 0.001
+
+
