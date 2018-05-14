@@ -43,7 +43,21 @@ def distanceBetween(startLat, startLon, endLat, endLon):
 def slopeBetweenSimple(startLat, startLon, endLat, endLon):
 	return elevationChange(startLat, startLon, endLat, endLon) / distanceBetween(startLat, startLon, endLat, endLon)
 
-# TODO: sample the elevations between two coordinates, and return as an array (for use in a visual of the elevation changes along the route)
+# Sample the elevations between two coordinates, and return as an array (for use in a visual of the elevation changes along the route)
+def sampleElevations(startLat, startLon, endLat, endLon, numPoints = 10):
+	elevations = []
+	dlat = (endLat - startLat) / (numPoints - 1)
+	dlon = (endLon - startLon) / (numPoints - 1)
+	lat = startLat
+	lon = startLon
+
+	for i in range(numPoints):
+		elevations += [getElevation(lat, lon)]
+		lat += dlat
+		lon += dlon
+
+	return elevations
+
 
 # Conversion utility functions:
 def feetToMeters(feet):
@@ -65,5 +79,10 @@ def radiansToDegrees(degrees):
 # print(distanceBetween(34.141365, -118.122908, 34.140965, -118.124518)) # should be about 500ft
 # print(elevationChange(34.141365, -118.122908, 34.140965, -118.124518)) # should be about 1ft
 # print(slopeBetweenSimple(34.141365, -118.122908, 34.140965, -118.124518)) # should be about 0.001
+
+# # should be a list of 10 increasing elevations, from about 790 to about 1800 ft (9 intervals)
+# print(sampleElevations(34.140374, -118.132294, 34.204025, -118.130679)) 
+# # should be a list of 19 increasing elevations, from about 790 to about 1800 ft, that are the same as the above values but with twice the resolution (18 intervals)
+# print(sampleElevations(34.140374, -118.132294, 34.204025, -118.130679, 19)) 
 
 
