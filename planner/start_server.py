@@ -1,57 +1,73 @@
+import logging
 from concurrent import futures
 import time
 import json
 import grpc
+
+
 import planner_pb2
 import planner_pb2_grpc
-from config import config
-from orienteering_router import OrienteeringRouter
 
 from db_conn import connPool
+from routers.base_router import RouteEncoder
+from routers.orienteering_router import OrienteeringRouter
+from routers.point2point_router import Point2PointRouter
 
 _ONE_DAY_IN_SECONDS = 60 * 60 * 24
+
+logger = logging.getLogger(__name__)
 
 
 class RoutePlanner(planner_pb2_grpc.RoutePlannerServicer):
 
-    def PlanRoute(self, request, context):
-        data = {}
-        constraints = json.loads(request.jsonData)
+    def PlanRoute(self, jsonrequest, context):
+        req = json.loads(jsonrequest.jsonData)
+        logger.info('Received PlanRoute() call. Data: %s', req)
 
-        print('Received PlanRoute() call. Constraints:')
-        print(constraints)
+        try:
+            # Parse required params
+            # Convert origins and dests to lists of tuples
+            origins = [(o['latitude'], o['longitude'])
+                       for o in req.pop('origins')]
+            dests = [(d['latitude'], d['longitude'])
+                     for d in req.pop('dests')]
+            noptions = req.pop('noptions')
 
-        # Lat/lng of origin
-        origin = constraints.get('origin')
-        destination = constraints.get('destination')
-        desired_length = constraints.get('desiredLength')
-        if origin is not None and destination is not None:
-            orig_lat = float(origin.get('latitude'))
-            orig_lng = float(origin.get('longitude'))
-            dest_lat = float(destination.get('latitude'))
-            dest_lng = float(destination.get('longitude'))
-            conn = connPool.getconn()
+            # Neither origins nor dests can be empty
+            if not (origins and dests):
+                raise ValueError('Origins or dests cannot be empty')
 
-            if desired_length:
-                desired_length = float(desired_length)
-                router = OrienteeringRouter(config['gmapsApiKey'], conn)
-                linestring, length = router.make_route((orig_lat, orig_lng), (dest_lat, dest_lng), desired_length)
-                route_geometry = json.loads(linestring)
-            else:
-                cur = conn.cursor()
-                cur.execute('SELECT * FROM pathFromNearestKnownPoints(%s,%s,%s,%s)',
-                            (orig_lng, orig_lat, dest_lng, dest_lat))
-                linestring, length = cur.fetchone()
-                route_geometry = json.loads(linestring)
+            # Make routes
+            with connPool.getconn() as conn:
+                if 'desired_dist' not in req:
+                    router = Point2PointRouter(conn)
+
+                else:
+                    router = OrienteeringRouter(conn)
+
+                routes = router.make_route(origins, dests, noptions, **req)
 
             connPool.putconn(conn)
-            data['route'] = route_geometry
-            data['length'] = length
-            json_data = json.dumps(data, separators=(',', ':'))
-            return planner_pb2.JsonReply(jsonData=json_data)
-        else:
+
+            # # Convert RouteResults into objects that can be serialized by
+            # # json.dumps. NamedTuples are serialized as tuples, which is not
+            # # what we want.
+            # routeobjs = [
+            #     {
+            #         'json': json.loads(r.route),
+            #         'score': r.score,
+            #         'length': r.length
+            #     } for r in routes]
+            # jsonreply_obj = {'routes': routeobjs}
+
+            # jsonData is not the JS object, but its string
+            jsonData = RouteEncoder().encode({'routes': routes})
+
+            return planner_pb2.JsonReply(jsonData=jsonData)
+
+        except ValueError as e:
             context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
-            context.set_details('Invalid origin or destination!')
+            context.set_details(e)
             return planner_pb2.JsonReply()
 
 
@@ -59,6 +75,7 @@ def serve():
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
     planner_pb2_grpc.add_RoutePlannerServicer_to_server(RoutePlanner(), server)
     server.add_insecure_port('[::]:1235')
+    logger.info('Starting server')
     server.start()
     try:
         while True:
@@ -68,4 +85,7 @@ def serve():
 
 
 if __name__ == '__main__':
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s:%(name)s:%(levelname)s:%(message)s')
     serve()
