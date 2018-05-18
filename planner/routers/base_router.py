@@ -4,7 +4,7 @@ from typing import *
 
 
 class RouteResult:
-    def __init__(self, json: str, score: float, length: float, origin_idx: int,
+    def __init__(self, json: str, score: float, length: float, elevationData, origin_idx: int,
                  dest_idx: int):
         """
         Create a route result.
@@ -18,6 +18,7 @@ class RouteResult:
         self.json = json
         self.score = score
         self.length = length
+        self.elevationData = elevationData
         self.origin_idx = origin_idx
         self.dest_idx = dest_idx
 
