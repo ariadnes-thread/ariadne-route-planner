@@ -291,7 +291,7 @@ def solve_orienteering(
     return heapq.nlargest(noptions, make_all_paths(), key=lambda x: x[1])
 
 
-def get_route_geojson(conn, edges_sql: str, nodes: List[int]) -> str:
+def get_route_geojson(conn, edges_sql: str, nodes: List[int]):
     """
     Find route through all vertices and return its GeoJSON.
     :param edges_sql: Edges query for pgr_dijkstra.
@@ -305,13 +305,15 @@ def get_route_geojson(conn, edges_sql: str, nodes: List[int]) -> str:
         )
         SELECT
           ST_AsGeoJSON(ST_MakeLine(
-            CASE WHEN node = source THEN the_geom ELSE ST_Reverse(the_geom) END
-          )) AS geojson
+            CASE WHEN node = source THEN ways.the_geom ELSE ST_Reverse(ways.the_geom) END
+          )) AS geojson,
+          array_agg(ARRAY[length_m, wvp.elevation]) as elevationData
         FROM dijkstra
-          JOIN ways ON dijkstra.edge = ways.gid;
+          JOIN ways ON dijkstra.edge = ways.gid
+          JOIN ways_vertices_pgr wvp on dijkstra.node = wvp.id;;
         ''', (edges_sql, nodes,))
 
-        return cur.fetchone()[0]
+        return cur.fetchone()
 
 
 class OrienteeringRouter(BaseRouter):
@@ -390,17 +392,20 @@ class OrienteeringRouter(BaseRouter):
                                    origins, dests, noptions)
         logger.info('BEST PATHS: %s', paths)
 
-        # Get GeoJSON of each path
-        return [
-            RouteResult(
-                get_route_geojson(self.conn, edges_sql, p.path),
+        routes = []
+
+        for p in paths:
+            geojson, elevationData = get_route_geojson(self.conn, edges_sql, p.path)
+            routes.append(RouteResult(
+                geojson,
                 p.score, p.length,
+                elevationData,
                 # Hack: this is simple but kludgy
                 origins.index(p.path[0]),
                 dests.index(p.path[-1])
-            )
-            for p in paths
-        ]
+            ))
+        # Get GeoJSON of each path
+        return routes
 
 
 def midpoint(coord1, coord2):
