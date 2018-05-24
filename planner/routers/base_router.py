@@ -4,27 +4,21 @@ from typing import *
 
 
 class RouteResult:
-    def __init__(self, json: str, score: float, length: float, elevationData, origin_idx: int,
-                 dest_idx: int):
+    def __init__(self, geojson: str, score: float, length: float, elevationData):
         """
         Create a route result.
-        :param json: GeoJSON of route.
+        :param geojson: GeoJSON of route.
         :param score: Score of route. It doesn't have meaning alone but can be
                       compared with other routes.
         :param length: Meters.
-        :param origin_idx: Index of origin in original request.
-        :param dest_idx: Same
         """
-        self.json = json
+        self.geojson = geojson
         self.score = score
         self.length = length
         self.elevationData = elevationData
-        self.origin_idx = origin_idx
-        self.dest_idx = dest_idx
 
     def __str__(self):
-        return "RouteResult(json='{}...', score={}, length={}, origin_idx={}, dest_idx={}".format(
-            self.json[:20], self.score, self.length, self.origin_idx, self.dest_idx)
+        return str(vars(self))
 
 
 class RouteEncoder(json.JSONEncoder):
@@ -42,15 +36,13 @@ class RouteEncoder(json.JSONEncoder):
 class BaseRouter(abc.ABC):
 
     @abc.abstractmethod
-    def make_route(self, origins: List[Tuple[float, float]],
-                   dests: List[Tuple[float, float]], noptions: int, **kwargs
-                   ) -> List[RouteResult]:
+    def make_route(self, origin: Tuple[float, float], dest: Tuple[float, float],
+                   **kwargs) -> RouteResult:
         """
-        Make routes.
-        :param origins: Possible origins.
-        :param dests: Possible destinations.
-        :param noptions: # route options to return.
+        Make a route.
+        :param origin: lat/lon of origin.
+        :param dest: lat/lon of destination.
         :param kwargs: Additional kwargs
-        :return: List of RouteResults.
+        :return: Resulting route.
         """
         raise NotImplementedError

@@ -25,17 +25,11 @@ class RoutePlanner(planner_pb2_grpc.RoutePlannerServicer):
         logger.info('Received PlanRoute() call. Data: %s', req)
 
         try:
-            # Parse required params
-            # Convert origins and dests to lists of tuples
-            origins = [(o['latitude'], o['longitude'])
-                       for o in req.pop('origins')]
-            dests = [(d['latitude'], d['longitude'])
-                     for d in req.pop('dests')]
-            noptions = req.pop('noptions')
-
-            # Neither origins nor dests can be empty
-            if not (origins and dests):
-                raise ValueError('Origins or dests cannot be empty')
+            # Convert origin and dest to tuples
+            origin = req.pop('origin')
+            origin = (origin['latitude'], origin['longitude'])
+            dest = req.pop('dest')
+            dest = (dest['latitude'], dest['longitude'])
 
             # Make routes
             conn = connPool.getconn()
@@ -46,20 +40,9 @@ class RoutePlanner(planner_pb2_grpc.RoutePlannerServicer):
                     else:
                         router = OrienteeringRouter(conn)
 
-                    routes = router.make_route(origins, dests, noptions, **req)
+                    routes = router.make_route(origin, dest, **req)
             finally:
                 connPool.putconn(conn)
-
-            # # Convert RouteResults into objects that can be serialized by
-            # # json.dumps. NamedTuples are serialized as tuples, which is not
-            # # what we want.
-            # routeobjs = [
-            #     {
-            #         'json': json.loads(r.route),
-            #         'score': r.score,
-            #         'length': r.length
-            #     } for r in routes]
-            # jsonreply_obj = {'routes': routeobjs}
 
             # jsonData is not the JS object, but its string
             jsonData = RouteEncoder().encode({'routes': routes})
