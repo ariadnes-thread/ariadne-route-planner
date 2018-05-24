@@ -38,16 +38,17 @@ class RoutePlanner(planner_pb2_grpc.RoutePlannerServicer):
                 raise ValueError('Origins or dests cannot be empty')
 
             # Make routes
-            with connPool.getconn() as conn:
-                if 'desired_dist' not in req:
-                    router = Point2PointRouter(conn)
+            conn = connPool.getconn()
+            try:
+                with conn:
+                    if 'desired_dist' not in req:
+                        router = Point2PointRouter(conn)
+                    else:
+                        router = OrienteeringRouter(conn)
 
-                else:
-                    router = OrienteeringRouter(conn)
-
-                routes = router.make_route(origins, dests, noptions, **req)
-
-            connPool.putconn(conn)
+                    routes = router.make_route(origins, dests, noptions, **req)
+            finally:
+                connPool.putconn(conn)
 
             # # Convert RouteResults into objects that can be serialized by
             # # json.dumps. NamedTuples are serialized as tuples, which is not

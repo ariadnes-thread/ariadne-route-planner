@@ -25,11 +25,12 @@ class Point2PointRouter(BaseRouter):
                 cur.execute(
                     'SELECT * FROM pathFromNearestKnownPoints(%s,%s,%s,%s)',
                     (*reversed(origin), *reversed(dest)))
-                linestring, length = cur.fetchone()
+                linestring, length, elevationData = cur.fetchone()
                 output.append(RouteResult(
                     json=linestring,
                     score=0,
                     length=length,
+                    elevationData=elevationData,
                     origin_idx=oi,
                     dest_idx=di
                 ))
