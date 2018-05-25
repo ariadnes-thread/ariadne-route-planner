@@ -1,11 +1,10 @@
-import heapq
-import itertools
 import logging
 import random
 from typing import *
 from googleplaces import GooglePlacesAttributeError
 import utils.poi_types as poi_types
-from routers.base_router import BaseRouter, RouteResult
+from routers.base_router import *
+from pprint import pprint
 
 from utils import google_utils as GoogleUtils
 
@@ -16,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 class PathResult(NamedTuple):
-    path: List[int]
+    points: List[int]
     score: float
     length: float
 
@@ -25,6 +24,7 @@ class GmapsResult(NamedTuple):
     name: str
     latlon: Tuple[float, float]
     score: float
+    type: str
 
 
 def get_pois_from_gmaps(loc: Tuple[float, float], radius: float,
@@ -58,7 +58,8 @@ def get_pois_from_gmaps(loc: Tuple[float, float], radius: float,
                     name=place.name,
                     latlon=(float(place.geo_location['lat']),
                             float(place.geo_location['lng'])),
-                    score=float(place.rating) * poi_prefs[poitype]
+                    score=float(place.rating) * poi_prefs[poitype],
+                    type=poitype
                 ))
             except GooglePlacesAttributeError:
                 # Name, location, or rating wasn't available. Skip it
@@ -343,11 +344,25 @@ class OrienteeringRouter(BaseRouter):
         path = solve_orienteering(poi_score, length_m, pairdist, origin, dest)
         logger.info('Best path: %s', path)
 
-        geojson, elevationData = get_route_geojson(self.conn, edges_sql, path.path)
+        # Build list of POI results
+        poiresults = []
+        for prev, curr in zip(path.points[:-2], path.points[1:-1]):
+            # Note that path.points[1:-1] is the list of POIs, since the first
+            # point is the origin and the last point is the destination.
+            # prev = point before current POI, curr = current POI
+            poiresults.append(PoiResult(
+                poi_nodes[curr].latlon,
+                poi_nodes[curr].name,
+                poi_nodes[curr].type,
+                pairdist[(prev, curr)]
+            ))
+
+        geojson, elevationData = get_route_geojson(self.conn, edges_sql, path.points)
         return RouteResult(
             geojson,
             path.score, path.length,
-            elevationData
+            elevationData,
+            pois=poiresults
         )
 
 
@@ -381,7 +396,7 @@ def main():
     #     {'type': 'GeometryCollection', 'geometries': linestringlist}
     # ))
 
-    print(route)
+    pprint(RouteEncoder().encode(route))
 
 
 if __name__ == '__main__':

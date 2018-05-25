@@ -24,6 +24,7 @@ class Point2PointRouter(BaseRouter):
                 score=0,
                 length=length,
                 elevationData=elevationData,
+                pois=[]
             )
 
 
