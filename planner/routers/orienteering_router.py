@@ -98,7 +98,6 @@ def make_edges_sql(conn, edge_prefs: Dict[str, float],
         if bbox is not None:
             bbox_query = 'WHERE ways.the_geom && ST_MakeEnvelope(%(xmin).6f, %(ymin).6f, %(xmax).6f, %(ymax).6f, 4326)' \
                          % bbox
-        print('***BBOX :' + bbox_query)
         if sum(edge_prefs.values()) == 0:
             # No edge preferences
             return \
