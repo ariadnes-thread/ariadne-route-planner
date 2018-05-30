@@ -84,9 +84,8 @@ def nearest_vertex(conn, latlon: Tuple[float, float]) -> int:
         result = cur.fetchone()
         return result[0]
 
-
 def make_edges_sql(conn, edge_prefs: Dict[str, float],
-                   max_discount: float = 0.7) -> str:
+                   max_discount: float = 0.7, bbox=None) -> str:
     """
     Make edges_sql query from map of edge preferences. It's suitable for
     use in pgr_dijkstra calls.
@@ -94,18 +93,25 @@ def make_edges_sql(conn, edge_prefs: Dict[str, float],
     :param edge_prefs: Map of edge preferences.
     :return: edges_sql string.
     """
-    if sum(edge_prefs.values()) == 0:
-        # No edge preferences
-        return \
-            '''
-            SELECT
-              gid AS id, source, target,
-              length_m AS cost,
-              length_m * SIGN(reverse_cost) AS reverse_cost
-            FROM ways
-            '''
-
+    bbox_query = ''
     with conn.cursor() as cur:
+        if bbox is not None:
+            bbox_query = 'WHERE ways.the_geom && ST_MakeEnvelope(%(xmin).6f, %(ymin).6f, %(xmax).6f, %(ymax).6f, 4326)' \
+                         % bbox
+        print('***BBOX :' + bbox_query)
+        if sum(edge_prefs.values()) == 0:
+            # No edge preferences
+            return \
+                '''
+                SELECT
+                  gid AS id, source, target,
+                  length_m AS cost,
+                  length_m * SIGN(reverse_cost) AS reverse_cost
+                FROM ways
+                ''' + bbox_query
+
+
+
         # Adjust edge costs by their greenery/popularity values, weighted by
         # preferences
         return cur.mogrify(
@@ -122,7 +128,7 @@ def make_edges_sql(conn, edge_prefs: Dict[str, float],
                     AS multiplier
                 FROM ways_metadata                  
               ) AS ways_multipliers USING (gid)
-            ''',
+            ''' + bbox_query,
             (max_discount,
              edge_prefs.get('green', 0),
              edge_prefs.get('popularity', 0),
@@ -312,6 +318,7 @@ class OrienteeringRouter(BaseRouter):
         length_m = kwargs.pop('desired_dist')
         poi_prefs = kwargs.pop('poi_prefs')
         edge_prefs = kwargs.pop('edge_prefs')
+        bbox = kwargs.pop('bbox', None)
 
         # Get points of interest
         center = midpoint(origin_latlon, dest_latlon)
@@ -329,7 +336,7 @@ class OrienteeringRouter(BaseRouter):
         poi_score = {vid: poi_nodes[vid].score for vid in poi_nodes}
 
         # Compute edges_sql based on edge preferences
-        edges_sql = make_edges_sql(self.conn, edge_prefs)
+        edges_sql = make_edges_sql(self.conn, edge_prefs, bbox=bbox)
 
         # Compute pairwise distances between origins, dests, and POIs
         pairdist = pairwise_shortest_path_costs(
