@@ -14,10 +14,17 @@ class Point2PointRouter(BaseRouter):
         :param dest: (lat, lon) of dest.
         :return:
         """
+
         with self.conn.cursor() as cur:
-            cur.execute(
-                'SELECT * FROM pathFromNearestKnownPoints(%s,%s,%s,%s)',
-                (*reversed(origin), *reversed(dest)))
+            if 'bbox' in kwargs:
+                bbox = kwargs['bbox']
+                cur.execute(
+                    'SELECT * FROM pathFromNearestKnownPointsBBOX(%s,%s,%s,%s,%s,%s,%s,%s)',
+                    (*reversed(origin), *reversed(dest), bbox['xmin'], bbox['ymin'], bbox['xmax'], bbox['ymax']))
+            else:
+                cur.execute(
+                    'SELECT * FROM pathFromNearestKnownPoints(%s,%s,%s,%s)',
+                    (*reversed(origin), *reversed(dest)))
             linestring, length, elevationData = cur.fetchone()
             return RouteResult(
                 geojson=linestring,
