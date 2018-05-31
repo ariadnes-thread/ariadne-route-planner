@@ -1,12 +1,10 @@
-import heapq
-import itertools
 import logging
-import statistics
 import random
 from typing import *
 from googleplaces import GooglePlacesAttributeError
 import utils.poi_types as poi_types
-from routers.base_router import BaseRouter, RouteResult
+from routers.base_router import *
+from pprint import pprint
 
 from utils import google_utils as GoogleUtils
 
@@ -17,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 class PathResult(NamedTuple):
-    path: List[int]
+    points: List[int]
     score: float
     length: float
 
@@ -26,6 +24,7 @@ class GmapsResult(NamedTuple):
     name: str
     latlon: Tuple[float, float]
     score: float
+    type: str
 
 
 def get_pois_from_gmaps(loc: Tuple[float, float], radius: float,
@@ -59,7 +58,8 @@ def get_pois_from_gmaps(loc: Tuple[float, float], radius: float,
                     name=place.name,
                     latlon=(float(place.geo_location['lat']),
                             float(place.geo_location['lng'])),
-                    score=float(place.rating) * poi_prefs[poitype]
+                    score=float(place.rating) * poi_prefs[poitype],
+                    type=poitype
                 ))
             except GooglePlacesAttributeError:
                 # Name, location, or rating wasn't available. Skip it
@@ -84,9 +84,8 @@ def nearest_vertex(conn, latlon: Tuple[float, float]) -> int:
         result = cur.fetchone()
         return result[0]
 
-
 def make_edges_sql(conn, edge_prefs: Dict[str, float],
-                   max_discount: float = 0.7) -> str:
+                   max_discount: float = 0.7, bbox=None) -> str:
     """
     Make edges_sql query from map of edge preferences. It's suitable for
     use in pgr_dijkstra calls.
@@ -94,18 +93,24 @@ def make_edges_sql(conn, edge_prefs: Dict[str, float],
     :param edge_prefs: Map of edge preferences.
     :return: edges_sql string.
     """
-    if sum(edge_prefs.values()) == 0:
-        # No edge preferences
-        return \
-            '''
-            SELECT
-              gid AS id, source, target,
-              length_m AS cost,
-              length_m * SIGN(reverse_cost) AS reverse_cost
-            FROM ways
-            '''
-
+    bbox_query = ''
     with conn.cursor() as cur:
+        if bbox is not None:
+            bbox_query = 'WHERE ways.the_geom && ST_MakeEnvelope(%(xmin).6f, %(ymin).6f, %(xmax).6f, %(ymax).6f, 4326)' \
+                         % bbox
+        if sum(edge_prefs.values()) == 0:
+            # No edge preferences
+            return \
+                '''
+                SELECT
+                  gid AS id, source, target,
+                  length_m AS cost,
+                  length_m * SIGN(reverse_cost) AS reverse_cost
+                FROM ways
+                ''' + bbox_query
+
+
+
         # Adjust edge costs by their greenery/popularity values, weighted by
         # preferences
         return cur.mogrify(
@@ -122,7 +127,7 @@ def make_edges_sql(conn, edge_prefs: Dict[str, float],
                     AS multiplier
                 FROM ways_metadata                  
               ) AS ways_multipliers USING (gid)
-            ''',
+            ''' + bbox_query,
             (max_discount,
              edge_prefs.get('green', 0),
              edge_prefs.get('popularity', 0),
@@ -165,9 +170,9 @@ def pairwise_shortest_path_costs(conn, edges_sql: str, origins: List[int],
 def solve_orienteering(
         poi_score: Dict[int, float], max_distance: float,
         pairdist: Dict[Tuple[int, int], float],
-        origins: List[int], dests: List[int], noptions: int,
+        origin: int, dest: int,
         power_param: float = 4.0, length_param: int = 4,
-        n_total_trials: int = 1000) -> List[PathResult]:
+        n_total_trials: int = 1000) -> PathResult:
     """
     Return high-scoring paths from any origin to any destination.
     Paths accumulate score by visiting POIs.
@@ -178,11 +183,8 @@ def solve_orienteering(
         '(o, d) for o in origins + pois for d in pois + dests'
         should be represented. However, missing pairs are allowed; they are
         assumed not to exist.
-    :param origins: List of possible origins.
-    :param dests: List of possible destinations.
-    :param noptions: Return up to this many options. There are a variety
-        of reasons this method may return fewer than 'noptions' paths;
-        see the comment for make_paths().
+    :param origin:
+    :param dest:
     Orienteering algorithm parameters:
     :param power_param: Configures how desirability is calculated.
     :param length_param: Configures how many of the top nodes to keep.
@@ -247,48 +249,16 @@ def solve_orienteering(
             dist += pairdist[(cur, nextnode)]
             visited.add(nextnode)
 
-    def make_paths(origin: int, dest: int, ntrials: int
-                   ) -> Iterator[PathResult]:
-        """
-        Make paths from origin to destination. Return unique paths found.
+    if (origin, dest) not in pairdist:
+        raise ValueError("Origin and dest are not connected")
 
-        There are several cases where the function may return zero, only
-        one, or very few paths.
-        - If origin cannot reach dest, return empty list.
-        - If distance from origin to dest > max distance, technically no
-          path is valid but we assume the user wanted a short path
-          as possible, so return the path directly from origin to dest.
-        - Otherwise, return up to the # distinct paths found.
-        :param origin: Start of path.
-        :param dest: Destination of path.
-        :param ntrials: Number of trials to execute.
-        :return: Iterator of (path, score, length).
-        """
-        if (origin, dest) not in pairdist:
-            # Origin and dest are not connected. Yield no routes
-            return
+    bestpath = None
+    for _ in range(n_total_trials):
+        path = make_path(origin, dest)
+        if bestpath is None or bestpath.score < path.score:
+            bestpath = path
 
-        if pairdist[origin, dest] > max_distance:
-            # Yield only direct origin -> dest path
-            yield PathResult([origin, dest], 0, pairdist[origin, dest])
-            return
-
-        # Return unique paths
-        pathset = set()
-        for _ in range(ntrials):
-            path, score, length = make_path(origin, dest)
-            t = tuple(path)
-            if t not in pathset:
-                yield PathResult(path, score, length)
-                pathset.add(t)
-
-    def make_all_paths() -> Iterator[PathResult]:
-        for o, d in itertools.product(origins, dests):
-            yield from make_paths(
-                o, d, n_total_trials // (len(origins) * len(dests))
-            )
-
-    return heapq.nlargest(noptions, make_all_paths(), key=lambda x: x[1])
+    return bestpath
 
 
 def get_route_geojson(conn, edges_sql: str, nodes: List[int]):
@@ -329,9 +299,8 @@ class OrienteeringRouter(BaseRouter):
         """
         self.conn = conn
 
-    def make_route(self, origin_latlons: List[Tuple[float, float]],
-                   dest_latlons: List[Tuple[float, float]], noptions: int,
-                   **kwargs) -> List[RouteResult]:
+    def make_route(self, origin_latlon: Tuple[float, float],
+                   dest_latlon: Tuple[float, float], **kwargs) -> RouteResult:
         """
         Make routes of at most a given length while visitng points of interest.
 
@@ -342,70 +311,65 @@ class OrienteeringRouter(BaseRouter):
         - edge_prefs: Dict[str, float] - Map of edge types to their weights.
           The keys are a subset of ['green', 'popularity'].
 
-        :return: List of routes. Each route is a RouteResult, containing
-            (GeoJSON, score, total length in meters).
-            Score is meant for comparing routes, but doesn't necessarily have
-            meaning alone.
+        :return: Resulting route.
         """
         # Parse kwargs
         length_m = kwargs.pop('desired_dist')
         poi_prefs = kwargs.pop('poi_prefs')
         edge_prefs = kwargs.pop('edge_prefs')
-
-        # Compute median point
-        # TODO this isn't the center of the smallest circle that covers all the
-        # origins/dests...but solving that (the smallest-circle problem) is
-        # complicated.
-        lats, lons = zip(*(origin_latlons + dest_latlons))
-        medlat = statistics.median(lats)
-        medlon = statistics.median(lons)
-        center = (medlat, medlon)
-        logger.info('CENTER: %s', center)
+        bbox = kwargs.pop('bbox', None)
 
         # Get points of interest
+        center = midpoint(origin_latlon, dest_latlon)
         pois = get_pois_from_gmaps(center, length_m / 2, poi_prefs)
 
         # Map origins, dests, and POIs to actual vertices
-        origins = [nearest_vertex(self.conn, o) for o in origin_latlons]
-        dests = [nearest_vertex(self.conn, d) for d in dest_latlons]
+        origin = nearest_vertex(self.conn, origin_latlon)
+        dest = nearest_vertex(self.conn, dest_latlon)
         poi_nodes = {
             nearest_vertex(self.conn, poi.latlon): poi
             for poi in pois
         }
-        logger.info('ORIGINS: %s, DEST: %s', origins, dests)
-        logger.info('POIs: %s', poi_nodes)
+        logger.info('Origin %s, dest %s, center %s', origin, dest, center)
+        logger.info('POIs: %s', poi_nodes.keys())
         poi_score = {vid: poi_nodes[vid].score for vid in poi_nodes}
 
         # Compute edges_sql based on edge preferences
-        edges_sql = make_edges_sql(self.conn, edge_prefs)
+        edges_sql = make_edges_sql(self.conn, edge_prefs, bbox=bbox)
 
         # Compute pairwise distances between origins, dests, and POIs
         pairdist = pairwise_shortest_path_costs(
-            self.conn, edges_sql, origins + list(poi_nodes.keys()),
-            list(poi_nodes.keys()) + dests)
+            self.conn, edges_sql, [origin] + list(poi_nodes.keys()),
+            list(poi_nodes.keys()) + [dest])
+        logger.info('Computed pairdist')
         # TODO if a node is not connected, pairdist may silently omit distances
         # Sanity check that dest is actually reachable from origin?
         # Other checks for strongly connected components?
 
-        # Get high-scoring paths from origins to dests
-        paths = solve_orienteering(poi_score, length_m, pairdist,
-                                   origins, dests, noptions)
-        logger.info('BEST PATHS: %s', paths)
+        # Solve orienteering problem
+        path = solve_orienteering(poi_score, length_m, pairdist, origin, dest)
+        logger.info('Best path: %s', path)
 
-        routes = []
-
-        for p in paths:
-            geojson, elevationData = get_route_geojson(self.conn, edges_sql, p.path)
-            routes.append(RouteResult(
-                geojson,
-                p.score, p.length,
-                elevationData,
-                # Hack: this is simple but kludgy
-                origins.index(p.path[0]),
-                dests.index(p.path[-1])
+        # Build list of POI results
+        poiresults = []
+        for prev, curr in zip(path.points[:-2], path.points[1:-1]):
+            # Note that path.points[1:-1] is the list of POIs, since the first
+            # point is the origin and the last point is the destination.
+            # prev = point before current POI, curr = current POI
+            poiresults.append(PoiResult(
+                poi_nodes[curr].latlon,
+                poi_nodes[curr].name,
+                poi_nodes[curr].type,
+                pairdist[(prev, curr)]
             ))
-        # Get GeoJSON of each path
-        return routes
+
+        geojson, elevationData = get_route_geojson(self.conn, edges_sql, path.points)
+        return RouteResult(
+            geojson,
+            path.score, path.length,
+            elevationData,
+            pois=poiresults
+        )
 
 
 def midpoint(coord1, coord2):
@@ -414,28 +378,21 @@ def midpoint(coord1, coord2):
 
 
 def main():
-    origins = [(34.140003, -118.122775),  # Avery
-               (34.136872, -118.122910),  # Olive walk
-               (34.137038, -118.127548),  # Kerchoff?
-               ]
-    dests = [(34.143209, -118.118393),  # PCC
-             (34.147672, -118.144328),  # Pasadena city hall
-             ]
-    length_m = 4000  # Maximum length of path in meters
+    origin = (34.140003, -118.122775)  # Avery
+    dest = (34.140771, -118.132323)  # Lake ave
+    length_m = 2000  # Maximum length of path in meters
     poi_prefs = {
         poi_types.TYPE_PARK: 2,
-        poi_types.TYPE_ART_GALLERY: 5
     }
     edge_prefs = {
-        'popularity': 1,
-        'green': 5
+        # 'popularity': 1,
+        # 'green': 5
     }
-    noptions = 5
 
     conn = db_conn.connPool.getconn()
     router = OrienteeringRouter(conn)
-    routes = router.make_route(
-        origins, dests, noptions, desired_dist=length_m, poi_prefs=poi_prefs,
+    route = router.make_route(
+        origin, dest, desired_dist=length_m, poi_prefs=poi_prefs,
         edge_prefs=edge_prefs)
 
     # linestringlist = []
@@ -445,11 +402,10 @@ def main():
     #     {'type': 'GeometryCollection', 'geometries': linestringlist}
     # ))
 
-    for route in routes:
-        print(route)
+    pprint(RouteEncoder().encode(route))
 
 
 if __name__ == '__main__':
     import db_conn
-
+    logging.basicConfig(level=logging.INFO)
     main()

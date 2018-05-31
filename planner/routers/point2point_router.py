@@ -8,48 +8,39 @@ class Point2PointRouter(BaseRouter):
     def __init__(self, conn):
         self.conn = conn
 
-    def make_route(self, origins, dests, noptions, **kwargs):
+    def make_route(self, origin, dest, **kwargs):
         """
-        :param origins: (lat, lon) pairs.
-        :param dests: (lat, lon) pairs.
+        :param origin: (lat, lon) of origin
+        :param dest: (lat, lon) of dest.
         :return:
         """
-        output = []
-        with self.conn.cursor() as cur:
-            # First 'noptions' routes in norigins * ndests.
-            origin_dest_options = itertools.islice(
-                itertools.product(enumerate(origins), enumerate(dests)),
-                noptions)
 
-            for (oi, origin), (di, dest) in origin_dest_options:
+        with self.conn.cursor() as cur:
+            if 'bbox' in kwargs:
+                bbox = kwargs['bbox']
+                cur.execute(
+                    'SELECT * FROM pathFromNearestKnownPointsBBOX(%s,%s,%s,%s,%s,%s,%s,%s)',
+                    (*reversed(origin), *reversed(dest), bbox['xmin'], bbox['ymin'], bbox['xmax'], bbox['ymax']))
+            else:
                 cur.execute(
                     'SELECT * FROM pathFromNearestKnownPoints(%s,%s,%s,%s)',
                     (*reversed(origin), *reversed(dest)))
-                linestring, length, elevationData = cur.fetchone()
-                output.append(RouteResult(
-                    json=linestring,
-                    score=0,
-                    length=length,
-                    elevationData=elevationData,
-                    origin_idx=oi,
-                    dest_idx=di
-                ))
-        return output
+            linestring, length, elevationData = cur.fetchone()
+            return RouteResult(
+                geojson=linestring,
+                score=0,
+                length=length,
+                elevationData=elevationData,
+                pois=[]
+            )
 
 
 def main():
-    origins = [(34.140003, -118.122775),  # Avery
-               (34.136872, -118.122910),  # Olive walk
-               (34.137038, -118.127548),  # Kerchoff?
-               ]
-    dests = [(34.143209, -118.118393),  # PCC
-             (34.147672, -118.144328),  # Pasadena city hall
-             ]
+    origin = (34.140003, -118.122775)  # Avery
+    dest = (34.147672, -118.144328)  # Pasadena city hall
     router = Point2PointRouter(db_conn.connPool.getconn())
-    # pprint(router.make_route(origins, dests, 4))
-    routes = router.make_route(origins, dests, 4)
-    for route in routes:
-        print(route)
+    print(router.make_route(origin, dest))
+
 
 if __name__ == '__main__':
     import db_conn
