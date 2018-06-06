@@ -37,12 +37,13 @@ class RoutePlanner(planner_pb2_grpc.RoutePlannerServicer):
             try:
                 with conn:
                     if 'desired_dist' not in req:
-                        if 'poi_prefs' not in req:
+                        # If POIs not provided
+                        if 'poi_prefs' not in req or req['poi_prefs'] == {}:
                             router = Point2PointRouter(conn)
                         else:
                             router = Point2PointRouter(conn) # TODO: change, once the POI's-on-the-way router is added
                     else:
-                        if 'poi_prefs' not in req:
+                        if 'poi_prefs' not in req or req['poi_prefs'] == {}:
                             router = DistEdgePrefsRouter(conn)
                         else:
                             router = OrienteeringRouter(conn)
