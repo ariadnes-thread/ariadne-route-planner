@@ -75,6 +75,10 @@ class DistEdgePrefsRouter(BaseRouter):
 
         geojson, length, elevationData = get_route_geojson(self.conn, origin_latlon, dest_latlon, length_m, edge_prefs.get('green', 0),
              edge_prefs.get('popularity', 0))
+
+        # Hack: make sure linestring is in the correct direction
+        geojson = orient_linestring(origin_latlon, dest_latlon, geojson)
+
         return RouteResult(
             geojson,
             0, length,
@@ -89,8 +93,8 @@ def midpoint(coord1, coord2):
 
 def main():
     origin = (34.140003, -118.122775)  # Avery
-    dest = (34.140771, -118.132323)  # Lake ave
-    length_m = 2000  # Maximum length of path in meters
+    dest = (34.147672, -118.144328)  # Pasadena city hall
+    length_m = 5000  # Maximum length of path in meters
     edge_prefs = {
         'popularity': 1,
         'green': 5
