@@ -102,7 +102,7 @@ def main():
         origin, dest, desired_dist=length_m,
         edge_prefs=edge_prefs)
 
-    pprint(RouteEncoder().encode(route))
+    print(RouteEncoder().encode(route))
 
 
 if __name__ == '__main__':
