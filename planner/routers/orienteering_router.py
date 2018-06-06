@@ -402,7 +402,7 @@ def main():
     #     {'type': 'GeometryCollection', 'geometries': linestringlist}
     # ))
 
-    pprint(RouteEncoder().encode(route))
+    print(RouteEncoder().encode(route))
 
 
 if __name__ == '__main__':
