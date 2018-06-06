@@ -33,7 +33,8 @@ def get_route_geojson(conn, origin, dest, distance, popularity, greenery):
     lon2 = dest[1]
     lat2 = dest[0]
 
-    print (lon1, lat1, lon2, lat2, distance, popularity, greenery)
+    logger.info("Lon1 %s, Lat1 %s, Lon2 %s, Lat2 %s,\n distance %s,\n popularity %s,\n greenery %s",
+                lon1, lat1, lon2, lat2, distance, popularity, greenery)
     with conn.cursor() as cur:
         cur.execute('''
             SELECT * FROM 
