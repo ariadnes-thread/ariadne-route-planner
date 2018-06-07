@@ -279,7 +279,8 @@ def get_route_geojson(conn, edges_sql: str, nodes: List[int]):
           )) AS geojson,
           array_agg(ARRAY[length_m, elevation, nPoints]) as elevationData
             FROM (
-                SELECT node, source, ways.the_geom, length_m, wvp.elevation, SUM(ST_NumPoints(ways.the_geom)) OVER (ORDER BY seq) as nPoints
+                SELECT node, source, ways.the_geom, length_m, wvp.elevation, 
+                    SUM(ST_NumPoints(ways.the_geom) - 1) OVER (ORDER BY seq) as nPoints
                 FROM dijkstra JOIN ways ON dijkstra.edge = ways.gid
                 JOIN ways_vertices_pgr wvp on dijkstra.node = wvp.id) subq;
         ''', (edges_sql, nodes,))
