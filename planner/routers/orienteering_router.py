@@ -275,12 +275,13 @@ def get_route_geojson(conn, edges_sql: str, nodes: List[int]):
         )
         SELECT
           ST_AsGeoJSON(ST_MakeLine(
-            CASE WHEN node = source THEN ways.the_geom ELSE ST_Reverse(ways.the_geom) END
+            CASE WHEN node = source THEN the_geom ELSE ST_Reverse(the_geom) END
           )) AS geojson,
-          array_agg(ARRAY[length_m, wvp.elevation]) as elevationData
-        FROM dijkstra
-          JOIN ways ON dijkstra.edge = ways.gid
-          JOIN ways_vertices_pgr wvp on dijkstra.node = wvp.id;;
+          array_agg(ARRAY[length_m, elevation, nPoints]) as elevationData
+            FROM (
+                SELECT node, source, ways.the_geom, length_m, wvp.elevation, SUM(ST_NumPoints(ways.the_geom)) OVER (ORDER BY seq) as nPoints
+                FROM dijkstra JOIN ways ON dijkstra.edge = ways.gid
+                JOIN ways_vertices_pgr wvp on dijkstra.node = wvp.id) subq;
         ''', (edges_sql, nodes,))
 
         return cur.fetchone()
