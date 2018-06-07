@@ -1,7 +1,4 @@
-import itertools
-from pprint import pprint
-
-from routers.base_router import BaseRouter, RouteResult
+from routers.base_router import BaseRouter, RouteResult, orient_linestring
 
 
 class Point2PointRouter(BaseRouter):
@@ -26,6 +23,10 @@ class Point2PointRouter(BaseRouter):
                     'SELECT * FROM pathFromNearestKnownPoints(%s,%s,%s,%s)',
                     (*reversed(origin), *reversed(dest)))
             linestring, length, elevationData = cur.fetchone()
+
+            # HACK: reverse linestring if it is backwards.
+            linestring = orient_linestring(origin, dest, linestring)
+
             return RouteResult(
                 geojson=linestring,
                 score=0,

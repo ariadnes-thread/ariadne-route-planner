@@ -1,5 +1,6 @@
 import abc
 import json
+import math
 from typing import *
 
 
@@ -74,3 +75,19 @@ class BaseRouter(abc.ABC):
         :return: Resulting route.
         """
         raise NotImplementedError
+
+
+
+def distance(coord1, coord2):
+    return math.hypot(coord1[0] - coord2[0], coord1[1] - coord2[1])
+
+
+def orient_linestring(origin, dest, linestring):
+    """Reverse linestring if it is backwards. Return correctly oriented
+    linestring."""
+    linestring = json.loads(linestring)
+    if distance(tuple(reversed(dest)), linestring['coordinates'][0]) \
+            < distance(tuple(reversed(origin)), linestring['coordinates'][0]):
+        linestring['coordinates'].reverse()
+    return json.dumps(linestring)
+

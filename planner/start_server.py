@@ -12,6 +12,7 @@ from db_conn import connPool
 from routers.base_router import RouteEncoder
 from routers.orienteering_router import OrienteeringRouter
 from routers.point2point_router import Point2PointRouter
+from routers.dist_edge_prefs_router import DistEdgePrefsRouter
 
 _ONE_DAY_IN_SECONDS = 60 * 60 * 24
 
@@ -36,9 +37,16 @@ class RoutePlanner(planner_pb2_grpc.RoutePlannerServicer):
             try:
                 with conn:
                     if 'desired_dist' not in req:
-                        router = Point2PointRouter(conn)
+                        # If POIs not provided
+                        if 'poi_prefs' not in req or req['poi_prefs'] == {}:
+                            router = Point2PointRouter(conn)
+                        else:
+                            router = Point2PointRouter(conn) # TODO: change, once the POI's-on-the-way router is added
                     else:
-                        router = OrienteeringRouter(conn)
+                        if 'poi_prefs' not in req or req['poi_prefs'] == {}:
+                            router = DistEdgePrefsRouter(conn)
+                        else:
+                            router = OrienteeringRouter(conn)
 
                     routes = router.make_route(origin, dest, **req)
             finally:
