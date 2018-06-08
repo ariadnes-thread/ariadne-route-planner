@@ -45,8 +45,22 @@ class POIsOnWayRouter(BaseRouter):
 
         gmaps_results.sort(key=lambda g: ellipse_distance_sq(origin_latlon, dest_latlon, g.latlon))
         gmaps_results = gmaps_results[:3]
-        print(gmaps_results)
-        # TODO: POIs are not in the optimal order to be visited...but oh well
+        logger.info('POIs: {}'.format(gmaps_results))
+
+        # Sort the POIs by their scalar projection on the line from the origin
+        # to the destination. This approximates the optimal order to visit them
+        def scalar_proj(o, a, d):
+            """Compute scalar projection of OA onto OD"""
+            oa = (a[0] - o[0], a[1] - o[1])
+            od = (d[0] - o[0], d[1] - o[1])
+            dot_product = oa[0] * od[0] + oa[1] * od[1]
+            magnitude_od = math.hypot(od[0], od[1])
+            return dot_product / magnitude_od
+        # print('Before sorting:')
+        # for gmaps_result in gmaps_results:
+        #     print(gmaps_result, 'proj=', scalar_proj(origin_latlon, gmaps_result.latlon, dest_latlon))
+        gmaps_results.sort(key=lambda g: scalar_proj(origin_latlon, g.latlon, dest_latlon))
+        logger.info('After sorting: {}'.format(gmaps_results))
 
         # Map origins, dests, and POIs to actual vertices
         origin = orientrouter.nearest_vertex(self.conn, origin_latlon)
@@ -106,8 +120,7 @@ def main():
     origin = (34.140003, -118.122775)  # Avery
     dest = (34.140771, -118.132323)  # Lake ave
     poi_prefs = {
-        poi_types.TYPE_PARK: 2,
-        poi_types.TYPE_ART_GALLERY: 3,
+        poi_types.TYPE_ART_GALLERY: 2
     }
     edge_prefs = {
         'popularity': 1,
