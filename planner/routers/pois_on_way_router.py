@@ -73,7 +73,7 @@ class POIsOnWayRouter(BaseRouter):
         with self.conn.cursor() as cur:
             cur.execute('''
             WITH dijkstra AS (
-                SELECT * FROM pgr_dijkstraVia(%s, %s)
+                SELECT * FROM pgr_dijkstraVia(%s, %s, U_turn_on_edge:=FALSE)
             )
             SELECT
               ST_AsGeoJSON(ST_MakeLine(
