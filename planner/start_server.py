@@ -41,7 +41,7 @@ class RoutePlanner(planner_pb2_grpc.RoutePlannerServicer):
                         if 'poi_prefs' not in req or req['poi_prefs'] == {}:
                             router = Point2PointRouter(conn)
                         else:
-                            router = POIsOnWayRouter(conn)  # TODO: change, once the POI's-on-the-way router is added
+                            router = POIsOnWayRouter(conn)
                     else:
                         if 'poi_prefs' not in req or req['poi_prefs'] == {}:
                             router = DistEdgePrefsRouter(conn)
