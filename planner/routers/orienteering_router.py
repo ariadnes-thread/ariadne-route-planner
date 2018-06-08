@@ -9,8 +9,6 @@ from pprint import pprint
 from utils import google_utils as GoogleUtils
 
 
-__all__ = ['OrienteeringRouter']
-
 logger = logging.getLogger(__name__)
 
 
