@@ -1,6 +1,6 @@
 import logging
 from routers.base_router import *
-import poi_types
+import utils.poi_types as poi_types
 # Sorta hack: importing from another router
 import routers.orienteering_router as orientrouter
 
@@ -41,7 +41,8 @@ class POIsOnWayRouter(BaseRouter):
         # Compute nearest POIs to path
         def ellipse_distance_sq(f1, f2, p):
             """dist(f1, p)^2 + dist(f2, p)^2"""
-            return (p[0] - f1[0])**2 + (p[1] - f1[1])**2 + (p[0] - f2[0])**2 + (p[1] - f2[1])**2
+            return (p[0] - f1[0]) ** 2 + (p[1] - f1[1]) ** 2 + (p[0] - f2[0]) ** 2 + (p[1] - f2[1]) ** 2
+
         gmaps_results.sort(key=lambda g: ellipse_distance_sq(origin_latlon, dest_latlon, g.latlon))
         gmaps_results = gmaps_results[:3]
         print(gmaps_results)
@@ -57,51 +58,48 @@ class POIsOnWayRouter(BaseRouter):
         nodes = [origin] + pois + [dest]
         with self.conn.cursor() as cur:
             cur.execute('''
-            CREATE TEMPORARY TABLE dijkstra AS (
-              SELECT * FROM pgr_dijkstraVia(%s, %s)
-            );
-            ''', (edges_sql, nodes,))
-
-            cur.execute('''
+            WITH dijkstra AS (
+                SELECT * FROM pgr_dijkstraVia(%s, %s)
+            )
             SELECT
               ST_AsGeoJSON(ST_MakeLine(
-                CASE WHEN node = source THEN ways.the_geom ELSE ST_Reverse(ways.the_geom) END
+                CASE WHEN node = source THEN the_geom ELSE ST_Reverse(the_geom) END
               )) AS geojson,
-              array_agg(ARRAY[length_m, wvp.elevation]) AS elevationData,
-              SUM(dijkstra.cost)
-            FROM dijkstra
-              JOIN ways ON dijkstra.edge = ways.gid
-              JOIN ways_vertices_pgr wvp ON dijkstra.node = wvp.id;
-            ''', ())
+              array_agg(ARRAY[length_m, elevation, nPoints]) AS elevationData, SUM(length_m) AS length
+                FROM (
+                    SELECT node, source, ways.the_geom, length_m, wvp.elevation, 
+                        SUM(ST_NumPoints(ways.the_geom) - 1) OVER (ORDER BY seq) AS nPoints
+                    FROM dijkstra JOIN ways ON dijkstra.edge = ways.gid
+                    JOIN ways_vertices_pgr wvp ON dijkstra.node = wvp.id) subq;
+            ''', (edges_sql, nodes))
             geojson, elevationData, length = cur.fetchone()
 
-            # Compute length of each leg
-            cur.execute('''
-            SELECT SUM(cost)
-            FROM dijkstra 
-            GROUP BY path_id
-            ORDER BY path_id;
-            ''', ())
-            lengths_of_legs = cur.fetchall()
-            # length_of_legs is a list of 1-tuples. Convert to list of floats
-            lengths_of_legs = [l[0] for l in lengths_of_legs]
+            # # Compute length of each leg
+            # cur.execute('''
+            # SELECT SUM(cost)
+            # FROM dijkstra
+            # GROUP BY path_id
+            # ORDER BY path_id;
+            # ''', ())
+            # lengths_of_legs = cur.fetchall()
+            # # length_of_legs is a list of 1-tuples. Convert to list of floats
+            # lengths_of_legs = [l[0] for l in lengths_of_legs]
+            #
+            #
+            # logger.info('Lengths of legs: {}'.format(lengths_of_legs))
 
-            # TODO if there's an error above, will this table be dropped?
-            cur.execute('DROP TABLE dijkstra;')
-
-            logger.info('Lengths of legs: {}'.format(lengths_of_legs))
-
-
+        # Old Compute POIResult objects
+        # poiresults = [PoiResult(g.latlon, g.name, g.type, l)
+        #               for g, l in zip(gmaps_results, lengths_of_legs)]
         # Compute POIResult objects
-        poiresults = [PoiResult(g.latlon, g.name, g.type, l)
-                      for g, l in zip(gmaps_results, lengths_of_legs)]
+        poiresults = [PoiResult(g.latlon, g.name, g.type, -1)
+                      for g in gmaps_results]
         return RouteResult(
             geojson,
             0, length,
             elevationData,
             pois=poiresults
         )
-
 
 
 def main():
@@ -126,5 +124,6 @@ def main():
 
 if __name__ == '__main__':
     import db_conn
+
     logging.basicConfig(level=logging.INFO)
     main()

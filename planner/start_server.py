@@ -4,7 +4,6 @@ import time
 import json
 import grpc
 
-
 import planner_pb2
 import planner_pb2_grpc
 
@@ -13,6 +12,7 @@ from routers.base_router import RouteEncoder
 from routers.orienteering_router import OrienteeringRouter
 from routers.point2point_router import Point2PointRouter
 from routers.dist_edge_prefs_router import DistEdgePrefsRouter
+from routers.pois_on_way_router import POIsOnWayRouter
 
 _ONE_DAY_IN_SECONDS = 60 * 60 * 24
 
@@ -41,7 +41,7 @@ class RoutePlanner(planner_pb2_grpc.RoutePlannerServicer):
                         if 'poi_prefs' not in req or req['poi_prefs'] == {}:
                             router = Point2PointRouter(conn)
                         else:
-                            router = Point2PointRouter(conn) # TODO: change, once the POI's-on-the-way router is added
+                            router = POIsOnWayRouter(conn)  # TODO: change, once the POI's-on-the-way router is added
                     else:
                         if 'poi_prefs' not in req or req['poi_prefs'] == {}:
                             router = DistEdgePrefsRouter(conn)
@@ -59,7 +59,7 @@ class RoutePlanner(planner_pb2_grpc.RoutePlannerServicer):
 
         except ValueError as e:
             context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
-            context.set_details(e)
+            context.set_details(str(e))
             return planner_pb2.JsonReply()
 
 
